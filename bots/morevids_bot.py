@@ -67,7 +67,6 @@ async def send_welcome_video_and_menu(update_or_query, context: ContextTypes.DEF
     await context.bot.send_video(
         chat_id=chat_id,
         video=WELCOME_VIDEO_URL,
-        caption="🔥 Welcome to MoreVids 🔥\nExclusive content awaits you!",
         parse_mode='Markdown'
     )
 
