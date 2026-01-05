@@ -1,100 +1,100 @@
-# bots/tswrldbot.py
 import asyncio
 import datetime
 import stripe
 import asyncpg
 from flask import Flask, request, abort
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-from base import create_invite_link
-from db import init_db, add_member, log_action, get_member_status
-
-import os
-
-# 환경변수
-BOT_TOKEN = os.getenv("TSWRLDBOT_TOKEN")
-PRICE_LIFETIME = os.getenv("TSWRLDBOT_PRICE_LIFETIME")
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
-DATABASE_URL = os.getenv("DATABASE_URL")
-PORT = int(os.getenv("PORT", 10000))
+from config import *
+from bot_core.db import init_db, add_member, log_action, get_member_status
+from bot_core.keyboards import main_menu_keyboard, plans_keyboard, payment_keyboard
+from bot_core.texts import get_text
 
 stripe.api_key = STRIPE_SECRET_KEY
-
 flask_app = Flask(__name__)
 application = None
 
-# description + video
-DESCRIPTION = """──────────────────────────────
+async def get_user_language(user_id):
+    conn = await asyncpg.connect(DATABASE_URL)
+    row = await conn.fetchrow('SELECT language FROM members WHERE user_id = $1', user_id)
+    await conn.close()
+    return row['language'] if row and row['language'] else "EN"
 
-🎬 Welcome to private collection
+async def set_user_language(user_id, lang):
+    conn = await asyncpg.connect(DATABASE_URL)
+    await conn.execute(
+        'INSERT INTO members (user_id, language) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET language=$2',
+        user_id, lang
+    )
+    await conn.close()
 
-──────────────────────────────
-
-• Handpicked premium content only.
-
-• ★ Selected ★ OnlyFans Clips
-
-• JANUARY 2026: ★ ACTIVE ★
-
-──────────────────────────────
-
-★ Price: $21
-
-★ INSTANT ACCESS ★
-
-──────────────────────────────
-
-💡 After payment, please send proof for verification
-"""
-
-VIDEO_URL = "https://files.catbox.moe/lx7rj5.mp4"
-
-# START command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     await log_action(user_id, 'start')
+    lang = await get_user_language(user_id)
+    if not lang:
+        keyboard = [
+            [InlineKeyboardButton("🇬🇧 English", callback_data='lang_en')],
+            [InlineKeyboardButton("🇸🇦 العربية", callback_data='lang_ar')],
+            [InlineKeyboardButton("🇪🇸 Español", callback_data='lang_es')]
+        ]
+        await update.message.reply_text(
+            "🌍 Please select your preferred language:\n\n"
+            "🇬🇧 English\n"
+            "🇸🇦 العربية\n"
+            "🇪🇸 Español",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+    else:
+        await show_main_menu(update, context, lang)
 
-    keyboard = [
-        [InlineKeyboardButton("Show Vault", callback_data='show_content')]
-    ]
-    await update.message.reply_text(
-        "Welcome! Tap below to explore premium content.",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    today = datetime.datetime.utcnow().strftime("%b %d")
+    text = get_text("tswrld", lang) + f"\n\n📅 {today} — System Active\n⚡️ Instant Access — Ready"
+    reply_markup = main_menu_keyboard(lang)
+    if update.message:
+        await update.message.reply_text(text, parse_mode='Markdown', reply_markup=reply_markup)
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(text, parse_mode='Markdown', reply_markup=reply_markup)
 
-# 버튼 처리
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
+    lang = await get_user_language(user_id)
 
-    if query.data == 'show_content':
-        keyboard = [
-            [InlineKeyboardButton("💳 Stripe Checkout", callback_data='pay_stripe')],
-            [InlineKeyboardButton("💸 PayPal Payment", url="https://www.paypal.com/paypalme/minwookim384/21usd")],
-            [InlineKeyboardButton("📤 Send Proof", url="https://t.me/mbrypie")]
-        ]
-        await query.message.reply_video(video=VIDEO_URL, caption=DESCRIPTION, reply_markup=InlineKeyboardMarkup(keyboard))
-        await query.message.delete()
+    if query.data.startswith('lang_'):
+        new_lang = query.data.split('_')[1].upper()
+        await set_user_language(user_id, new_lang)
+        await query.edit_message_text(f"✅ Language changed to {new_lang}!")
+        await show_main_menu(query, context, new_lang)
+        return
 
-    elif query.data == 'pay_stripe':
+    if query.data == 'plans':
+        # tswrldbot은 lifetime plan only
+        keyboard = plans_keyboard(lang, monthly=False, lifetime=True)
+        await query.edit_message_text("🔥 Choose Your Membership Plan 🔥", parse_mode='Markdown', reply_markup=keyboard)
+
+    elif query.data == 'select_lifetime':
+        keyboard = payment_keyboard(lang, is_lifetime=True)
+        await query.edit_message_text("💳 Select Payment Method for Lifetime ($21)", parse_mode='Markdown', reply_markup=keyboard)
+
+    elif query.data.startswith('pay_stripe_'):
         session = stripe.checkout.Session.create(
             payment_method_types=['card'],
-            line_items=[{'price': PRICE_LIFETIME, 'quantity': 1}],
+            line_items=[{'price': TSWRLDBOT_PRICE_LIFETIME, 'quantity': 1}],
             mode='payment',
-            success_url="https://t.me/tswrldbot",
-            cancel_url="https://t.me/tswrldbot",
+            success_url=PORTAL_RETURN_URL,
+            cancel_url=PORTAL_RETURN_URL,
             metadata={'user_id': user_id}
         )
         await query.edit_message_text(
-            "Redirecting you to Stripe checkout...",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Pay Now", url=session.url)]])
+            "🔒 Redirecting to secure Stripe checkout...",
+            parse_mode='Markdown',
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Pay Now", url=session.url)]])
         )
 
-# Stripe Webhook
 @flask_app.route('/webhook/stripe', methods=['POST'])
 def stripe_webhook():
     payload = request.data
@@ -108,40 +108,25 @@ def stripe_webhook():
         session = event['data']['object']
         user_id = int(session['metadata']['user_id'])
         username = session.get('customer_details', {}).get('email') or f"user_{user_id}"
-
-        asyncio.run(add_member(user_id, username, session.get('customer'), session.get('subscription'), is_lifetime=True))
+        asyncio.run(add_member(user_id, username, session.get('customer'), None, True))
         asyncio.run(log_action(user_id, 'payment_stripe_lifetime', 21))
-
-        invite_link, expire_time = asyncio.run(create_invite_link(application.bot))
-        asyncio.run(application.bot.send_message(
-            user_id,
-            f"🎉 Lifetime Payment Successful!\n\n"
-            f"Your private channel invite link (expires in 10 minutes):\n{invite_link}\n\n"
-            f"Expires: {expire_time}\nEnjoy the premium content! 🔥"
-        ))
+        # TODO: invite link 보내기
 
     return '', 200
 
-# MAIN
 async def main():
     global application
     await init_db()
-
-    application = Application.builder().token(BOT_TOKEN).build()
-
+    application = Application.builder().token(TSWRLDBOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
-
     await application.initialize()
     await application.start()
     await application.updater.start_polling()
-
     import threading
     threading.Thread(target=lambda: flask_app.run(host='0.0.0.0', port=PORT), daemon=True).start()
-
-    print("tswrldbot is running!")
+    print("TSWRLDBOT running...")
     await asyncio.Event().wait()
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
-
