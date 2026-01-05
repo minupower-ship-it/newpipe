@@ -15,11 +15,14 @@ stripe.api_key = STRIPE_SECRET_KEY
 flask_app = Flask(__name__)
 application = None
 
+# 환영 동영상 URL
+WELCOME_VIDEO_URL = "https://files.catbox.moe/lx7rj5.mp4"
+
 async def get_user_language(user_id):
     conn = await asyncpg.connect(DATABASE_URL)
     row = await conn.fetchrow('SELECT language FROM members WHERE user_id = $1', user_id)
     await conn.close()
-    return row['language'] if row and row['language'] else "EN"
+    return row['language'] if row and row['language'] else None
 
 async def set_user_language(user_id, lang):
     conn = await asyncpg.connect(DATABASE_URL)
@@ -47,12 +50,48 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
-        await show_main_menu(update, context, lang)
+        await send_welcome_video_and_menu(update, context, lang)
 
-async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+async def send_welcome_video_and_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    """
+    동영상을 먼저 보내고, 그 다음 메인 메뉴를 보내는 공통 함수
+    update_or_query: Update.message 또는 CallbackQuery 객체
+    """
+    # chat_id 추출
+    if hasattr(update_or_query, 'message'):
+        chat_id = update_or_query.message.chat_id
+    else:  # CallbackQuery
+        chat_id = update_or_query.callback_query.message.chat_id
+
+    # 1. 환영 동영상 전송
+    await context.bot.send_video(
+        chat_id=chat_id,
+        video=WELCOME_VIDEO_URL,
+        caption="🔥 Welcome to TS World 🔥\nExclusive content is waiting for you!",
+        parse_mode='Markdown'
+    )
+
+    # 2. 메인 메뉴 전송
     today = datetime.datetime.utcnow().strftime("%b %d")
     text = get_text("tswrld", lang) + f"\n\n📅 {today} — System Active\n⚡️ Instant Access — Ready"
     reply_markup = main_menu_keyboard(lang)
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        parse_mode='Markdown',
+        reply_markup=reply_markup
+    )
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    """
+    기존 메뉴 갱신용 (동영상 없이 메뉴만 업데이트할 때 사용)
+    예: 버튼 클릭 후 메뉴 새로고침
+    """
+    today = datetime.datetime.utcnow().strftime("%b %d")
+    text = get_text("tswrld", lang) + f"\n\n📅 {today} — System Active\n⚡️ Instant Access — Ready"
+    reply_markup = main_menu_keyboard(lang)
+
     if update.message:
         await update.message.reply_text(text, parse_mode='Markdown', reply_markup=reply_markup)
     elif update.callback_query:
@@ -68,7 +107,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_lang = query.data.split('_')[1].upper()
         await set_user_language(user_id, new_lang)
         await query.edit_message_text(f"✅ Language changed to {new_lang}!")
-        await show_main_menu(query, context, new_lang)
+        # 언어 선택 후 동영상 + 메인 메뉴 표시
+        await send_welcome_video_and_menu(query, context, new_lang)
         return
 
     if query.data == 'plans':
