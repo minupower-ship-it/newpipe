@@ -29,7 +29,7 @@ application = None
 # description + video
 DESCRIPTION = """──────────────────────────────
 
-🎬 Welcome to the Exclusive Vault
+🎬 Welcome to private collection
 
 ──────────────────────────────
 
