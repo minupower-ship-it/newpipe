@@ -1,39 +1,29 @@
-# bot_core/keyboards.py
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
+def main_menu_keyboard(lang="EN"):
+    """메인 메뉴 버튼 (plans / status / help)"""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📦 View Plans", callback_data='plans')],
+        [InlineKeyboardButton("📊 My Subscription", callback_data='status')],
+        [InlineKeyboardButton("❓ Help & Support", callback_data='help')]
+    ])
 
-def language_selection_keyboard():
-    keyboard = [
-        [InlineKeyboardButton("🇬🇧 English", callback_data='lang_en')],
-        [InlineKeyboardButton("🇸🇦 العربية", callback_data='lang_ar')],
-        [InlineKeyboardButton("🇪🇸 Español", callback_data='lang_es')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def main_menu_keyboard(texts):
-    keyboard = [
-        [InlineKeyboardButton(texts["plans_btn"], callback_data='plans')],
-        [InlineKeyboardButton(texts["status_btn"], callback_data='status')],
-        [InlineKeyboardButton(texts["help_btn"], callback_data='help')],
-    ]
-    return InlineKeyboardMarkup(keyboard)
-
-
-def plan_selection_keyboard(texts, monthly=True, lifetime=True):
-    keyboard = []
+def plans_keyboard(lang="EN", monthly=True, lifetime=True):
+    """플랜 선택 버튼"""
+    buttons = []
     if monthly:
-        keyboard.append([InlineKeyboardButton(texts["monthly"], callback_data='select_monthly')])
+        buttons.append([InlineKeyboardButton("🔄 Monthly", callback_data='select_monthly')])
     if lifetime:
-        keyboard.append([InlineKeyboardButton(texts["lifetime"], callback_data='select_lifetime')])
-    keyboard.append([InlineKeyboardButton(texts["back"], callback_data='back_to_main')])
-    return InlineKeyboardMarkup(keyboard)
+        buttons.append([InlineKeyboardButton("💎 Lifetime", callback_data='select_lifetime')])
+    buttons.append([InlineKeyboardButton("⬅️ Back", callback_data='back_to_main')])
+    return InlineKeyboardMarkup(buttons)
 
-
-def payment_method_keyboard(texts, is_lifetime=False):
-    plan_type = "lifetime" if is_lifetime else "monthly"
-    keyboard = [
-        [InlineKeyboardButton(texts["pay_now"], callback_data=f'pay_stripe_{plan_type}')],
-        [InlineKeyboardButton(texts["back"], callback_data='plans')]
-    ]
-    return InlineKeyboardMarkup(keyboard)
+def payment_keyboard(lang="EN", is_lifetime=False):
+    """결제 수단 선택 버튼"""
+    plan = "lifetime" if is_lifetime else "monthly"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💳 Stripe", callback_data=f'pay_stripe_{plan}')],
+        [InlineKeyboardButton("🅿️ PayPal", callback_data=f'pay_paypal_{plan}')],
+        [InlineKeyboardButton("₿ Crypto", callback_data=f'pay_crypto_{plan}')],
+        [InlineKeyboardButton("⬅️ Back", callback_data='plans')]
+    ])
