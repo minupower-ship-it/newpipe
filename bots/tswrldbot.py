@@ -1,3 +1,5 @@
+import os
+
 import asyncio
 import datetime
 import stripe
@@ -10,6 +12,8 @@ from config import *
 from bot_core.db import init_db, add_member, log_action, get_member_status
 from bot_core.keyboards import main_menu_keyboard, plans_keyboard, payment_keyboard
 from bot_core.texts import get_text
+
+PORTAL_RETURN_URL = os.environ.get("TSWRLDBOT_PORTAL_RETURN_URL")
 
 stripe.api_key = STRIPE_SECRET_KEY
 flask_app = Flask(__name__)
