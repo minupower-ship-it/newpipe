@@ -1,1 +1,17 @@
+# requirements.txt
+
+# Telegram Bot
+python-telegram-bot[job-queue]==20.8
+
+# 비동기 PostgreSQL
+asyncpg==0.29.0
+
+# Stripe 결제
+stripe==10.7.0
+
+# 환경변수 로딩
+python-dotenv==1.0.1
+
+# Flask (Web Service)
+flask==3.0.3
 
