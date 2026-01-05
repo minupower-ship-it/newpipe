@@ -4,7 +4,7 @@
 python-telegram-bot[job-queue]==20.8
 
 # 비동기 PostgreSQL
-asyncpg==0.29.0
+asyncpg>=0.30.0
 
 # Stripe 결제
 stripe==10.7.0
