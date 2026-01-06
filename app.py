@@ -13,7 +13,7 @@ from bots.let_mebot import LetMeBot
 from bots.morevids_bot import MoreVidsBot
 from bots.onlytrns_bot import OnlyTrnsBot
 from bots.tswrldbot import TsWrldBot
-from config import STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL
+from config import STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -94,11 +94,31 @@ async def handle_payment_success(user_id, username, session, is_lifetime, bot_na
     try:
         await add_member(pool, user_id, username, session.get('customer'), session.get('subscription'), is_lifetime, bot_name)
         await log_action(pool, user_id, f'payment_stripe_{"lifetime" if is_lifetime else "monthly"}', amount, bot_name)
+
+        # 사용자에게 성공 메시지 보내기
         app_info = next((a for a in applications.values() if a["bot_instance"].bot_name == bot_name), None)
         if app_info:
             bot = app_info["app"].bot
             link, expiry = await create_invite_link(bot)
             await bot.send_message(user_id, f"🎉 Payment successful!\n\nYour invite link (expires {expiry}):\n{link}\n\nWelcome!")
+
+        # ★★★ 추가: 관리자에게 새 Stripe 결제 알림 ★★★
+        plan_type = "Lifetime" if is_lifetime else "Monthly"
+        payment_date = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
+        expire_date = "Permanent" if is_lifetime else (datetime.datetime.utcnow() + datetime.timedelta(days=30)).strftime('%Y-%m-%d')
+        admin_text = (
+            f"🔔 New Stripe Payment!\n\n"
+            f"User ID: {user_id}\n"
+            f"Username: {username}\n"
+            f"Bot: {bot_name}\n"
+            f"Plan: {plan_type}\n"
+            f"Payment Date: {payment_date}\n"
+            f"Expire Date: {expire_date}\n"
+            f"Amount: ${amount}"
+        )
+        # ADMIN_USER_ID로 알림 전송 (config.py에 정의되어 있어야 함)
+        await bot.send_message(ADMIN_USER_ID, admin_text)
+
     except Exception as e:
         logger.error(f"Payment handling failed for {user_id} ({bot_name}): {e}")
 
