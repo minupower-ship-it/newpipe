@@ -1,32 +1,33 @@
-import os
-
+# bots/tswrldbot.py
 import asyncio
 import datetime
+from datetime import timezone
 import stripe
 import asyncpg
 from flask import Flask, request, abort
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 from config import *
 from bot_core.db import init_db, add_member, log_action, get_member_status
-from bot_core.keyboards import main_menu_keyboard, plans_keyboard, payment_keyboard
+from bot_core.keyboards import main_menu_keyboard, payment_keyboard
 from bot_core.texts import get_text
 
-PORTAL_RETURN_URL = os.environ.get("TSWRLDBOT_PORTAL_RETURN_URL")
-
 stripe.api_key = STRIPE_SECRET_KEY
+
 flask_app = Flask(__name__)
 application = None
 
-# 환영 동영상 URL
-WELCOME_VIDEO_URL = "https://files.catbox.moe/lx7rj5.mp4"
+PAYPAL_LINK = "https://www.paypal.com/paypalme/minwookim384/21usd"
+CRYPTO_ADDRESS = "TERhALhVLZRqnS3mZGhE1XgxyLnKHfgBLi"
+CRYPTO_QR = "https://files.catbox.moe/aqlyct.jpg"
 
 async def get_user_language(user_id):
     conn = await asyncpg.connect(DATABASE_URL)
     row = await conn.fetchrow('SELECT language FROM members WHERE user_id = $1', user_id)
     await conn.close()
-    return row['language'] if row and row['language'] else None
+    return row['language'] if row and row['language'] else "EN"
 
 async def set_user_language(user_id, lang):
     conn = await asyncpg.connect(DATABASE_URL)
@@ -40,6 +41,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     await log_action(user_id, 'start')
     lang = await get_user_language(user_id)
+
     if not lang:
         keyboard = [
             [InlineKeyboardButton("🇬🇧 English", callback_data='lang_en')],
@@ -54,47 +56,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
-        await send_welcome_video_and_menu(update, context, lang)
-
-async def send_welcome_video_and_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, lang: str):
-    """
-    동영상을 먼저 보내고, 그 다음 메인 메뉴를 보내는 공통 함수
-    update_or_query: Update.message 또는 CallbackQuery 객체
-    """
-    # chat_id 추출
-    if hasattr(update_or_query, 'message'):
-        chat_id = update_or_query.message.chat_id
-    else:  # CallbackQuery
-        chat_id = update_or_query.callback_query.message.chat_id
-
-    # 1. 환영 동영상 전송
-    await context.bot.send_video(
-        chat_id=chat_id,
-        video=WELCOME_VIDEO_URL,
-        parse_mode='Markdown'
-    )
-
-    # 2. 메인 메뉴 전송
-    today = datetime.datetime.utcnow().strftime("%b %d")
-    text = get_text("tswrld", lang) + f"\n\n📅 {today} — System Active\n⚡️ Instant Access — Ready"
-    reply_markup = main_menu_keyboard(lang)
-
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        parse_mode='Markdown',
-        reply_markup=reply_markup
-    )
+        await show_main_menu(update, context, lang)
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
-    """
-    기존 메뉴 갱신용 (동영상 없이 메뉴만 업데이트할 때 사용)
-    예: 버튼 클릭 후 메뉴 새로고침
-    """
     today = datetime.datetime.utcnow().strftime("%b %d")
     text = get_text("tswrld", lang) + f"\n\n📅 {today} — System Active\n⚡️ Instant Access — Ready"
     reply_markup = main_menu_keyboard(lang)
-
     if update.message:
         await update.message.reply_text(text, parse_mode='Markdown', reply_markup=reply_markup)
     elif update.callback_query:
@@ -106,24 +73,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     lang = await get_user_language(user_id)
 
+    # 언어 선택
     if query.data.startswith('lang_'):
         new_lang = query.data.split('_')[1].upper()
         await set_user_language(user_id, new_lang)
         await query.edit_message_text(f"✅ Language changed to {new_lang}!")
-        # 언어 선택 후 동영상 + 메인 메뉴 표시
-        await send_welcome_video_and_menu(query, context, new_lang)
+        await show_main_menu(query, context, new_lang)
         return
 
-    if query.data == 'plans':
-        # tswrldbot은 lifetime plan only
-        keyboard = plans_keyboard(lang, monthly=False, lifetime=True)
-        await query.edit_message_text("🔥 Choose Your Membership Plan 🔥", parse_mode='Markdown', reply_markup=keyboard)
+    # 결제 버튼 처리
+    if query.data == 'pay_paypal':
+        await query.edit_message_text(
+            "💲 Pay via PayPal ($21 Lifetime)",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Pay Now", url=PAYPAL_LINK)]]),
+            parse_mode='Markdown'
+        )
 
-    elif query.data == 'select_lifetime':
-        keyboard = payment_keyboard(lang, is_lifetime=True)
-        await query.edit_message_text("💳 Select Payment Method for Lifetime ($21)", parse_mode='Markdown', reply_markup=keyboard)
+    elif query.data == 'pay_crypto':
+        text = f"💎 Pay via Crypto\n\nAddress: `{CRYPTO_ADDRESS}`"
+        await query.edit_message_text(
+            text,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("QR Code", url=CRYPTO_QR)]]),
+            parse_mode='Markdown'
+        )
 
-    elif query.data.startswith('pay_stripe_'):
+    elif query.data == 'pay_stripe':
         session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{'price': TSWRLDBOT_PRICE_LIFETIME, 'quantity': 1}],
@@ -151,9 +125,8 @@ def stripe_webhook():
         session = event['data']['object']
         user_id = int(session['metadata']['user_id'])
         username = session.get('customer_details', {}).get('email') or f"user_{user_id}"
-        asyncio.run(add_member(user_id, username, session.get('customer'), None, True))
+        asyncio.run(add_member(user_id, username, session.get('customer'), session.get('subscription'), True))
         asyncio.run(log_action(user_id, 'payment_stripe_lifetime', 21))
-        # TODO: invite link 보내기
 
     return '', 200
 
@@ -161,11 +134,13 @@ async def main():
     global application
     await init_db()
     application = Application.builder().token(TSWRLDBOT_TOKEN).build()
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(button_handler))
     await application.initialize()
     await application.start()
     await application.updater.start_polling()
+
     import threading
     threading.Thread(target=lambda: flask_app.run(host='0.0.0.0', port=PORT), daemon=True).start()
     print("TSWRLDBOT running...")
