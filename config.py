@@ -47,13 +47,13 @@ WELCOME_VIDEO_MOREVIDS = os.getenv("WELCOME_VIDEO_MOREVIDS")
 WELCOME_VIDEO_ONLYTRNS = os.getenv("WELCOME_VIDEO_ONLYTRNS")
 WELCOME_VIDEO_TSWRLD = os.getenv("WELCOME_VIDEO_TSWRLD")
 
-# Plan Prices (View Plans에서 가격 표시용)
+# Render External URL (웹훅용 - 필수!)
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
+
+# Plan Prices (View Plans에서 표시)
 PLAN_PRICES = {
     'letmebot': {'monthly': '$20', 'lifetime': '$50'},
     'morevids': {'monthly': '$20', 'lifetime': '$50'},
     'onlytrns': {'lifetime': '$25'},
     'tswrld': {'lifetime': '$21'},
 }
-
-
-RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
