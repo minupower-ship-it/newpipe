@@ -33,6 +33,12 @@ async def init_db(pool):
             );
         ''')
 
+        # 추가: bot_name 컬럼이 없으면 추가 (마이그레이션)
+        await conn.execute('''
+            ALTER TABLE daily_logs
+            ADD COLUMN IF NOT EXISTS bot_name TEXT;
+        ''')
+
 async def add_member(pool, user_id, username, customer_id=None, subscription_id=None, is_lifetime=False, bot_name='unknown'):
     expiry = None if is_lifetime else (datetime.datetime.utcnow() + datetime.timedelta(days=30))
     async with pool.acquire() as conn:
