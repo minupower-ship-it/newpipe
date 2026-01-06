@@ -73,3 +73,40 @@ async def get_member_status(user_id):
             SELECT * FROM members WHERE user_id = $1 AND active = TRUE
         ''', user_id)
     return dict(row) if row else None
+
+# 누락된 3개 함수 추가 (매일 리포트용)
+async def get_near_expiry():
+    """만료 임박 회원 (1일, 3일 남음)"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch('''
+            SELECT user_id, username, (expiry::date - CURRENT_DATE) AS days_left
+            FROM members
+            WHERE active = TRUE AND NOT is_lifetime AND (expiry::date - CURRENT_DATE) IN (1, 3)
+            ORDER BY days_left
+        ''')
+    return [(r['user_id'], r['username'] or f"ID{r['user_id']}", r['days_left']) for r in rows]
+
+async def get_expired_today():
+    """오늘 만료된 회원"""
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch('''
+            SELECT user_id, username FROM members
+            WHERE active = TRUE AND NOT is_lifetime AND expiry::date = CURRENT_DATE
+        ''')
+    return [(r['user_id'], r['username'] or f"ID{r['user_id']}") for r in rows]
+
+async def get_daily_stats():
+    """오늘 방문자 수 + 결제 총액"""
+    pool = await get_pool()
+    today = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow('''
+            SELECT 
+                COUNT(DISTINCT user_id) AS unique_users,
+                COALESCE(SUM(amount) FILTER (WHERE action LIKE 'payment_stripe%'), 0) AS total_revenue
+            FROM daily_logs
+            WHERE timestamp >= $1
+        ''', today)
+    return {'unique_users': row['unique_users'] or 0, 'total_revenue': float(row['total_revenue'] or 0)}
