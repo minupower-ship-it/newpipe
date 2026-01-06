@@ -1,4 +1,4 @@
 python-telegram-bot[job-queue]==20.8
 asyncpg>=0.30.0
 stripe==10.7.0
-quart==0.19.4  # Flask 대신 Quart (비동기 지원)
+flask==3.0.3
