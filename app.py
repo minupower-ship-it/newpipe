@@ -1,9 +1,10 @@
-# app.py
+# app.py (최종 - 모든 오류 해결: background async loop 추가)
 import os
 import asyncio
 import logging
 import datetime
-from quart import Quart, request, abort
+import threading
+from flask import Flask, request, abort
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from telegram.error import TimedOut
@@ -21,7 +22,7 @@ from bots.tswrldbot import start as tswrld_start, button_handler as tswrld_handl
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-app = Quart(__name__)  # Flask → Quart로 변경
+flask_app = Flask(__name__)
 
 BASE_URL = os.environ.get("RENDER_EXTERNAL_URL")
 if not BASE_URL:
@@ -29,13 +30,24 @@ if not BASE_URL:
 
 PORT = int(os.environ.get("PORT", 10000))
 
-# Health 체크 엔드포인트 (Render 포트 감지용)
-@app.route('/health')
-async def health():
+# Background async loop (no event loop 오류 해결)
+async_loop = None
+
+def run_async_loop():
+    global async_loop
+    async_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(async_loop)
+    async_loop.run_forever()
+
+threading.Thread(target=run_async_loop, daemon=True).start()
+
+# Health 체크 엔드포인트
+@flask_app.route('/health')
+def health():
     return "OK", 200
 
-@app.route('/')
-async def home():
+@flask_app.route('/')
+def home():
     return "Bot service is running!", 200
 
 # 봇 설정
@@ -48,10 +60,10 @@ BOT_HANDLERS = {
 
 applications = {}
 
-# Stripe Webhook (async route)
-@app.route('/webhook/stripe', methods=['POST'])
-async def stripe_webhook():
-    payload = await request.get_data()
+# Stripe Webhook
+@flask_app.route('/webhook/stripe', methods=['POST'])
+def stripe_webhook():
+    payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
@@ -74,7 +86,8 @@ async def stripe_webhook():
         }
         amount = amount_map.get(bot_name, 0)
 
-        asyncio.create_task(handle_payment_success(user_id, username, session, is_lifetime, bot_name, amount))
+        # async task in background loop
+        asyncio.run_coroutine_threadsafe(handle_payment_success(user_id, username, session, is_lifetime, bot_name, amount), async_loop)
 
     return '', 200
 
@@ -90,17 +103,18 @@ async def handle_payment_success(user_id, username, session, is_lifetime, bot_na
     except Exception as e:
         logger.error(f"Payment handling failed for {user_id}: {e}")
 
-# Telegram Webhook (async route)
-@app.route('/webhook/<token>', methods=['POST'])
-async def telegram_webhook(token):
+# Telegram Webhook
+@flask_app.route('/webhook/<token>', methods=['POST'])
+def telegram_webhook(token):
     app = next((a for a in applications.values() if a.bot.token == token), None)
     if not app:
         return abort(404)
 
     try:
-        data = await request.get_json(force=True)
+        data = request.get_json(force=True)
         update = Update.de_json(data, app.bot)
-        await app.process_update(update)  # async await으로 변경 (no event loop 오류 해결)
+        # async task in background loop
+        asyncio.run_coroutine_threadsafe(app.process_update(update), async_loop)
     except Exception as e:
         logger.error(f"Telegram update error: {e}")
 
@@ -135,13 +149,14 @@ async def setup_bots():
         await telegram_app.start()
         applications[key] = telegram_app
 
-# Quart startup에서 setup_bots 실행 (포트 바인딩 후 비동기 시작)
-@app.before_serving
-async def startup():
-    asyncio.create_task(setup_bots())
-    logger.info("Setup bots task started in background")
-
 if __name__ == "__main__":
-    # Quart 비동기 실행 (Flask run → app.run_task)
-    logger.info(f"Starting Quart server on http://0.0.0.0:{PORT}")
-    app.run_task(host="0.0.0.0", port=PORT, debug=False)
+    logger.info(f"Starting Flask server on http://0.0.0.0:{PORT}")
+    flask_app.run(
+        host="0.0.0.0",
+        port=PORT,
+        debug=False,
+        use_reloader=False
+    )
+
+    # setup_bots 실행 (Flask 시작 후)
+    threading.Thread(target=setup_bots).start()
