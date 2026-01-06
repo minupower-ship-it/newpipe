@@ -22,14 +22,14 @@ async def send_daily_report(context):
     if near or expired:
         message += "🚨 Expiring Soon\n"
         for user_id, username, days in near:
-            message += f"• @{username or user_id} - {days} days left\n"
+            message += f"• @{username} - {days} days left\n"
         for user_id, username in expired:
-            message += f"• @{username or user_id} - expires today\n"
+            message += f"• @{username} - expires today\n"
         message += "\n"
     else:
         message += "✅ No expirations today\n\n"
 
     message += f"👥 Unique visitors: {stats['unique_users']}\n"
-    message += f"💰 Revenue today: ${stats.get('total_revenue', 0):.2f}"
+    message += f"💰 Revenue today: ${stats['total_revenue']:.2f}"
 
     await context.bot.send_message(ADMIN_USER_ID, message)
