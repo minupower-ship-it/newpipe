@@ -2,7 +2,7 @@
 import os
 import asyncio
 import logging
-import datetime  # <-- NameError 해결을 위해 추가!
+import datetime  # datetime 오류 해결
 from flask import Flask, request, abort
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
@@ -12,7 +12,7 @@ from config import *
 from bot_core.db import init_db, add_member, log_action
 from bot_core.utils import create_invite_link, send_daily_report
 
-# 명시적 핸들러 import (KeyError 해결)
+# 핸들러 명시적 import
 from bots.let_mebot import start as letme_start, button_handler as letme_handler
 from bots.morevids_bot import start as morevids_start, button_handler as morevids_handler
 from bots.onlytrns_bot import start as onlytrns_start, button_handler as onlytrns_handler
@@ -29,7 +29,16 @@ if not BASE_URL:
 
 PORT = int(os.environ.get("PORT", 10000))
 
-# 봇 설정
+# Health 체크 엔드포인트 추가 (Render 포트 감지 + 헬스체크용)
+@flask_app.route('/health')
+def health():
+    return "OK", 200
+
+@flask_app.route('/')
+def home():
+    return "Bot service is running!", 200
+
+# 봇 핸들러 매핑
 BOT_HANDLERS = {
     "letme": {"start": letme_start, "handler": letme_handler, "token": LETMEBOT_TOKEN},
     "morevids": {"start": morevids_start, "handler": morevids_handler, "token": MOREVIDS_TOKEN},
@@ -77,9 +86,9 @@ async def handle_payment_success(user_id, username, session, is_lifetime, bot_na
         app = next((a for a in applications.values() if bot_name in a.bot.username.lower()), None)
         if app:
             link, expiry = await create_invite_link(app.bot)
-            await app.bot.send_message(user_id, f"🎉 Payment successful!\n\nYour invite link (expires {expiry}):\n{link}")
+            await app.bot.send_message(user_id, f"🎉 Payment successful!\n\nYour invite link (expires {expiry}):\n{link}\n\nWelcome!")
     except Exception as e:
-        logger.error(f"Payment handling failed for {user_id}: {e}")
+        logger.error(f"Payment handling failed: {e}")
 
 # Telegram Webhook
 @flask_app.route('/webhook/<token>', methods=['POST'])
@@ -106,7 +115,7 @@ async def setup_bots():
         app.add_handler(CommandHandler("start", cfg["start"]))
         app.add_handler(CallbackQueryHandler(cfg["handler"]))
 
-        # 매일 오전 9시 리포트 (UTC)
+        # 매일 리포트 (UTC 9시)
         app.job_queue.run_daily(
             send_daily_report,
             time=datetime.time(hour=9, minute=0, tzinfo=datetime.timezone.utc)
@@ -116,8 +125,6 @@ async def setup_bots():
         try:
             await app.bot.set_webhook(url=webhook_url)
             logger.info(f"{key.upper()} webhook set: {webhook_url}")
-        except TimedOut:
-            logger.warning(f"Webhook set timeout for {key}")
         except Exception as e:
             logger.error(f"Webhook set failed for {key}: {e}")
 
@@ -128,4 +135,13 @@ async def setup_bots():
 if __name__ == "__main__":
     asyncio.run(setup_bots())
     logger.info("All 4 bots are running with WEBHOOK mode!")
-    flask_app.run(host="0.0.0.0", port=PORT)
+    
+    # Render 포트 감지를 위해 명확한 로그 추가
+    logger.info(f"Starting Flask server on http://0.0.0.0:{PORT}")
+    
+    flask_app.run(
+        host="0.0.0.0",
+        port=PORT,
+        debug=False,
+        use_reloader=False
+    )
