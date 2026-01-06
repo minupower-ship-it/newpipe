@@ -1,117 +1,117 @@
 # app.py
 import os
 import asyncio
+import logging
 from flask import Flask, request, abort
 from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, JobQueue
 
-# 각 봇의 핸들러만 import (main 함수는 사용 안 함)
+from config import *
+from bot_core.db import init_db, add_member, log_action, get_pool
+from bot_core.utils import create_invite_link, send_daily_report
+
+# 봇 핸들러 import
 from bots.let_mebot import start as letme_start, button_handler as letme_handler
 from bots.onlytrns_bot import start as onlytrns_start, button_handler as onlytrns_handler
 from bots.tswrldbot import start as tswrld_start, button_handler as tswrld_handler
 from bots.morevids_bot import start as morevids_start, button_handler as morevids_handler
 
-from bot_core.db import init_db
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 flask_app = Flask(__name__)
 
-# 환경변수에서 도메인 가져오기 (Render 자동 제공)
-BASE_URL = os.environ.get("RENDER_EXTERNAL_URL")  # 예: https://your-service.onrender.com
+BASE_URL = os.environ.get("RENDER_EXTERNAL_URL")
 if not BASE_URL:
-    raise ValueError("RENDER_EXTERNAL_URL 환경변수를 설정해주세요! (Render 대시보드 > Environment)")
+    raise ValueError("RENDER_EXTERNAL_URL 환경변수 필수!")
 
 PORT = int(os.environ.get("PORT", 10000))
 
-# 각 봇 토큰 (config.py에서 불러온다고 가정)
 BOT_CONFIG = {
-    "letme":     LETMEBOT_TOKEN,       # 실제 변수명 확인하세요
-    "onlytrns":  ONLYTRNS_TOKEN,
-    "tswrld":    TSWRLDBOT_TOKEN,
-    "morevids":  MOREVIDS_TOKEN,
+    "letme": {"token": LETMEBOT_TOKEN, "name": "letmebot"},
+    "onlytrns": {"token": ONLYTRNS_TOKEN, "name": "onlytrns"},
+    "tswrld": {"token": TSWRLDBOT_TOKEN, "name": "tswrld"},
+    "morevids": {"token": MOREVIDS_TOKEN, "name": "morevids"},
 }
 
-# Application 객체 저장소
 applications = {}
 
-# Stripe 웹훅 (기존 어느 봇에서든 하나만 가져오면 됨 → 예: onlytrns_bot 기준)
-# 필요시 기존 코드 복사해서 붙여넣기 (현재는 간단히 유지)
 @flask_app.route('/webhook/stripe', methods=['POST'])
 def stripe_webhook():
-    # 기존에 있던 stripe webhook 코드 그대로 복사해서 쓰세요
-    # (모든 봇이 같은 STRIPE_WEBHOOK_SECRET 사용한다고 가정)
     payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
     except Exception as e:
-        print("Stripe webhook error:", e)
+        logger.error(f"Stripe webhook error: {e}")
         return abort(400)
 
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
         user_id = int(session['metadata']['user_id'])
-        # 공통 add_member, log_action 호출
-        asyncio.run(add_member(user_id, "stripe_user", session.get('customer'), session.get('subscription'), True))
-        asyncio.run(log_action(user_id, 'payment_stripe_webhook', 0))
+        bot_name = session['metadata'].get('bot_name', 'unknown')
+        username = session.get('customer_details', {}).get('email') or f"user_{user_id}"
+        price_id = session['line_items']['data'][0]['price']['id']
+        is_lifetime = any(price_id == cfg.get(f"{bot_name.upper()}_PRICE_LIFETIME") for cfg in [globals()])
+        amount = 50 if is_lifetime else 20  # 실제 가격은 bot별로 다름
+
+        asyncio.create_task(handle_successful_payment(user_id, username, session, is_lifetime, bot_name, amount))
 
     return '', 200
 
-# Telegram Webhook 공통 엔드포인트
+async def handle_successful_payment(user_id, username, session, is_lifetime, bot_name, amount):
+    await add_member(user_id, username, session.get('customer'), session.get('subscription'), is_lifetime, bot_name)
+    await log_action(user_id, f'payment_stripe_{"lifetime" if is_lifetime else "monthly"}', amount)
+
+    # 자동 초대 링크 생성 및 전송
+    app = next((a for a in applications.values() if a.bot.username.lower().startswith(bot_name)), None)
+    if app:
+        try:
+            link, expiry = await create_invite_link(app.bot)
+            await app.bot.send_message(user_id, f"🎉 Payment successful!\n\nYour access link (expires {expiry}):\n{link}")
+        except Exception as e:
+            logger.error(f"Invite link send failed for {user_id}: {e}")
+
 @flask_app.route('/webhook/<token>', methods=['POST'])
 def telegram_webhook(token):
-    if token not in BOT_CONFIG.values():
+    app = next((a for a in applications.values() if a.bot.token == token), None)
+    if not app:
         return abort(404)
 
-    # 해당 토큰의 app 찾아서 업데이트 처리
-    for app in applications.values():
-        if app.bot.token == token:
-            try:
-                update = Update.de_json(request.get_json(force=True), app.bot)
-                asyncio.run(app.process_update(update))
-            except Exception as e:
-                print(f"Error processing update for {token}: {e}")
-            return 'OK'
+    try:
+        update = Update.de_json(request.get_json(force=True), app.bot)
+        asyncio.create_task(app.process_update(update))
+    except Exception as e:
+        logger.error(f"Update processing error: {e}")
 
-    return abort(404)
+    return 'OK'
 
-# 각 봇 webhook 설정 + 핸들러 등록
 async def setup_bots():
     await init_db()
 
-    for name, token in BOT_CONFIG.items():
+    for key, cfg in BOT_CONFIG.items():
+        token = cfg["token"]
+        bot_name = cfg["name"]
         app = Application.builder().token(token).build()
 
-        # 핸들러 등록 (각 봇별)
-        if name == "letme":
-            app.add_handler(CommandHandler("start", letme_start))
-            app.add_handler(CallbackQueryHandler(letme_handler))
-        elif name == "onlytrns":
-            app.add_handler(CommandHandler("start", onlytrns_start))
-            app.add_handler(CallbackQueryHandler(onlytrns_handler))
-        elif name == "tswrld":
-            app.add_handler(CommandHandler("start", tswrld_start))
-            app.add_handler(CallbackQueryHandler(tswrld_handler))
-        elif name == "morevids":
-            app.add_handler(CommandHandler("start", morevids_start))
-            app.add_handler(CallbackQueryHandler(morevids_handler))
+        # 핸들러 등록
+        start_handler = globals()[f"{key}_start"]
+        handler = globals()[f"{key}_handler"]
+        app.add_handler(CommandHandler("start", start_handler))
+        app.add_handler(CallbackQueryHandler(handler))
 
-        # Webhook URL 설정
+        # Job Queue (매일 리포트)
+        app.job_queue.run_daily(send_daily_report, time=datetime.time(9, 0, 0))
+
         webhook_url = f"{BASE_URL}/webhook/{token}"
         await app.bot.set_webhook(url=webhook_url)
-        print(f"{name.upper()} BOT webhook set → {webhook_url}")
+        logger.info(f"{bot_name.upper()} webhook set: {webhook_url}")
 
-        applications[name] = app
         await app.initialize()
         await app.start()
+        applications[key] = app
 
-# 메인 실행
 if __name__ == "__main__":
-    # 비동기 설정 실행
     asyncio.run(setup_bots())
-
-    print("All 4 bots are running with WEBHOOK mode on one service!")
-    print("Stripe webhook: /webhook/stripe")
-    print(f"Server starting on port {PORT}...")
-
-    # Flask 실행 (blocking)
+    logger.info("All 4 bots running with WEBHOOK!")
     flask_app.run(host="0.0.0.0", port=PORT)
