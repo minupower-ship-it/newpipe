@@ -44,7 +44,7 @@ class BaseBot:
         await log_action(pool, user_id, 'start', bot_name=self.bot_name)
         lang = await self.get_user_language(user_id)
 
-        if lang == "EN":  # Default is EN, but check if set
+        if lang == "EN":  # 처음 시작 시 언어 선택
             keyboard = [
                 [InlineKeyboardButton("🇬🇧 English", callback_data='lang_en')],
                 [InlineKeyboardButton("🇸🇦 العربية", callback_data='lang_ar')],
@@ -77,7 +77,7 @@ class BaseBot:
         user_id = query.from_user.id
         lang = await self.get_user_language(user_id)
 
-        # 언어 선택
+        # 언어 선택 (처음 + 재선택 모두)
         if query.data.startswith('lang_'):
             new_lang = query.data.split('_')[1].upper()
             await self.set_user_language(user_id, new_lang)
@@ -85,7 +85,21 @@ class BaseBot:
             await self.send_welcome_and_menu(query, context, new_lang)
             return
 
-        # View Plans - 가격 표시 추가
+        # Change Language 버튼 클릭 시 → 언어 선택 키보드 다시 보여줌
+        if query.data == 'change_language':
+            keyboard = [
+                [InlineKeyboardButton("🇬🇧 English", callback_data='lang_en')],
+                [InlineKeyboardButton("🇸🇦 العربية", callback_data='lang_ar')],
+                [InlineKeyboardButton("🇪🇸 Español", callback_data='lang_es')]
+            ]
+            await query.edit_message_text(
+                "🌍 Change your preferred language:\n\n"
+                "Select below 👇",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+
+        # View Plans - 가격 표시 포함
         if query.data == 'plans':
             prices = PLAN_PRICES.get(self.bot_name, {'monthly': 'N/A', 'lifetime': 'N/A'})
             monthly_price = prices.get('monthly', 'N/A')
@@ -208,7 +222,7 @@ class BaseBot:
                 await query.edit_message_text("❌ Payment error. Please try again or contact support.")
             return
 
-        # Back to main (필요 시)
+        # Back to main
         if query.data == 'back_to_main':
             await query.edit_message_text("Back to main menu", reply_markup=main_menu_keyboard(lang))
             return
