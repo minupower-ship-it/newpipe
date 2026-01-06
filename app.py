@@ -2,7 +2,7 @@
 import os
 import asyncio
 import logging
-import datetime  # datetime 오류 해결
+import datetime  # NameError 해결
 from flask import Flask, request, abort
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
@@ -38,7 +38,7 @@ def health():
 def home():
     return "Bot service is running!", 200
 
-# 봇 핸들러 매핑
+# 봇 설정
 BOT_HANDLERS = {
     "letme": {"start": letme_start, "handler": letme_handler, "token": LETMEBOT_TOKEN},
     "morevids": {"start": morevids_start, "handler": morevids_handler, "token": MOREVIDS_TOKEN},
@@ -88,7 +88,7 @@ async def handle_payment_success(user_id, username, session, is_lifetime, bot_na
             link, expiry = await create_invite_link(app.bot)
             await app.bot.send_message(user_id, f"🎉 Payment successful!\n\nYour invite link (expires {expiry}):\n{link}\n\nWelcome!")
     except Exception as e:
-        logger.error(f"Payment handling failed: {e}")
+        logger.error(f"Payment handling failed for {user_id}: {e}")
 
 # Telegram Webhook
 @flask_app.route('/webhook/<token>', methods=['POST'])
@@ -125,6 +125,8 @@ async def setup_bots():
         try:
             await app.bot.set_webhook(url=webhook_url)
             logger.info(f"{key.upper()} webhook set: {webhook_url}")
+        except TimedOut:
+            logger.warning(f"Webhook set timeout for {key}")
         except Exception as e:
             logger.error(f"Webhook set failed for {key}: {e}")
 
