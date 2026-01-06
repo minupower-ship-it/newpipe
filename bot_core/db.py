@@ -33,10 +33,16 @@ async def init_db(pool):
             );
         ''')
 
-        # 추가: bot_name 컬럼이 없으면 추가 (마이그레이션)
+        # 추가: daily_logs에 bot_name 컬럼 없으면 추가 (기존)
         await conn.execute('''
             ALTER TABLE daily_logs
             ADD COLUMN IF NOT EXISTS bot_name TEXT;
+        ''')
+
+        # 추가: members에 bot_name 컬럼 없으면 추가 (새로, DEFAULT로 NOT NULL 대응)
+        await conn.execute('''
+            ALTER TABLE members
+            ADD COLUMN IF NOT EXISTS bot_name TEXT NOT NULL DEFAULT 'unknown';
         ''')
 
 async def add_member(pool, user_id, username, customer_id=None, subscription_id=None, is_lifetime=False, bot_name='unknown'):
