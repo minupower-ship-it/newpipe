@@ -2,7 +2,8 @@
 import os
 import asyncio
 import logging
-import datetime  # NameError 해결
+import datetime
+import threading
 from flask import Flask, request, abort
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
@@ -134,13 +135,16 @@ async def setup_bots():
         await app.start()
         applications[key] = app
 
-if __name__ == "__main__":
+def run_setup_bots():
     asyncio.run(setup_bots())
-    logger.info("All 4 bots are running with WEBHOOK mode!")
-    
-    # Render 포트 감지를 위해 명확한 로그 추가
-    logger.info(f"Starting Flask server on http://0.0.0.0:{PORT}")
-    
+
+if __name__ == "__main__":
+    # Flask를 먼저 시작해서 포트 바인딩 (No open ports detected 해결)
+    logger.info(f"Starting Flask server on http://0.0.0.0:{PORT} to bind port immediately")
+
+    # setup_bots를 별도 스레드에서 실행 (비동기 루프)
+    threading.Thread(target=run_setup_bots).start()
+
     flask_app.run(
         host="0.0.0.0",
         port=PORT,
