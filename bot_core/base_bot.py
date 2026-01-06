@@ -27,7 +27,7 @@ class BaseBot:
     async def get_user_language(self, user_id):
         pool = await get_pool()
         row = await get_member_status(pool, user_id)
-        return row.get('language', "EN")
+        return row.get('language', "EN") if row else "EN"
 
     async def set_user_language(self, user_id, lang):
         pool = await get_pool()
@@ -39,7 +39,8 @@ class BaseBot:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         pool = await get_pool()
-        user_id = update.message.from_user.id
+        user_id = update.effective_user.id
+        username = update.effective_user.username or f"user_{user_id}"  # username None 방지
         await log_action(pool, user_id, 'start', bot_name=self.bot_name)
         lang = await self.get_user_language(user_id)
 
@@ -114,16 +115,26 @@ class BaseBot:
         if query.data == 'status':
             pool = await get_pool()
             member = await get_member_status(pool, user_id)
-            if member:
-                expiry_text = "Permanent access" if member.get('is_lifetime') else f"Expires: {member.get('expiry').strftime('%Y-%m-%d') if member.get('expiry') else 'N/A'}"
+            
+            if member is not None and isinstance(member, dict):
+                is_lifetime = member.get('is_lifetime', False)
+                expiry = member.get('expiry')
+                created_at = member.get('created_at')
+                
+                expiry_text = "Permanent access" if is_lifetime else (
+                    f"Expires: {expiry.strftime('%Y-%m-%d')}" if expiry else "N/A"
+                )
+                payment_date = created_at.strftime('%Y-%m-%d') if created_at else "N/A"
+                
                 text = (
                     "📊 Your Subscription Status\n\n"
-                    f"• Plan: {'Lifetime' if member.get('is_lifetime') else 'Monthly'}\n"
-                    f"• Payment Date: {member.get('created_at').strftime('%Y-%m-%d')}\n"
+                    f"• Plan: {'Lifetime' if is_lifetime else 'Monthly'}\n"
+                    f"• Payment Date: {payment_date}\n"
                     f"• {expiry_text}"
                 )
             else:
                 text = "😔 No active subscription found.\nChoose a plan to begin!"
+            
             await query.edit_message_text(text, parse_mode='Markdown')
             return
 
@@ -140,7 +151,7 @@ class BaseBot:
             await query.edit_message_text(text, parse_mode='Markdown', reply_markup=keyboard)
             return
 
-        # 나머지 결제 관련 로직 (기존 그대로)
+        # 결제 관련 로직 (생략 없이 전체)
         if query.data == 'select_monthly' and self.has_monthly:
             keyboard = payment_keyboard(lang, is_lifetime=False)
             await query.edit_message_text("💳 Select Payment Method for Monthly", parse_mode='Markdown', reply_markup=keyboard)
