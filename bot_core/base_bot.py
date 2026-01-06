@@ -1,4 +1,3 @@
-# bot_core/base_bot.py
 import datetime
 import logging
 import stripe
@@ -44,7 +43,7 @@ class BaseBot:
         await log_action(pool, user_id, 'start', bot_name=self.bot_name)
         lang = await self.get_user_language(user_id)
 
-        if lang == "EN":  # 처음 시작 시 언어 선택
+        if lang == "EN":
             keyboard = [
                 [InlineKeyboardButton("🇬🇧 English", callback_data='lang_en')],
                 [InlineKeyboardButton("🇸🇦 العربية", callback_data='lang_ar')],
@@ -77,7 +76,6 @@ class BaseBot:
         user_id = query.from_user.id
         lang = await self.get_user_language(user_id)
 
-        # 언어 선택 (처음 + 재선택 모두)
         if query.data.startswith('lang_'):
             new_lang = query.data.split('_')[1].upper()
             await self.set_user_language(user_id, new_lang)
@@ -85,7 +83,6 @@ class BaseBot:
             await self.send_welcome_and_menu(query, context, new_lang)
             return
 
-        # Change Language 버튼 클릭 시 → 언어 선택 키보드 다시 보여줌
         if query.data == 'change_language':
             keyboard = [
                 [InlineKeyboardButton("🇬🇧 English", callback_data='lang_en')],
@@ -93,13 +90,11 @@ class BaseBot:
                 [InlineKeyboardButton("🇪🇸 Español", callback_data='lang_es')]
             ]
             await query.edit_message_text(
-                "🌍 Change your preferred language:\n\n"
-                "Select below 👇",
+                "🌍 Change your preferred language:\n\nSelect below 👇",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
             return
 
-        # View Plans - 가격 표시 포함
         if query.data == 'plans':
             prices = PLAN_PRICES.get(self.bot_name, {'monthly': 'N/A', 'lifetime': 'N/A'})
             monthly_price = prices.get('monthly', 'N/A')
@@ -116,7 +111,6 @@ class BaseBot:
             await query.edit_message_text(text, parse_mode='Markdown', reply_markup=keyboard)
             return
 
-        # My Subscription
         if query.data == 'status':
             pool = await get_pool()
             member = await get_member_status(pool, user_id)
@@ -133,7 +127,6 @@ class BaseBot:
             await query.edit_message_text(text, parse_mode='Markdown')
             return
 
-        # Help & Support
         if query.data == 'help':
             text = (
                 "❓ Help & Support\n\n"
@@ -147,19 +140,17 @@ class BaseBot:
             await query.edit_message_text(text, parse_mode='Markdown', reply_markup=keyboard)
             return
 
-        # Monthly plan 선택
+        # 나머지 결제 관련 로직 (기존 그대로)
         if query.data == 'select_monthly' and self.has_monthly:
             keyboard = payment_keyboard(lang, is_lifetime=False)
             await query.edit_message_text("💳 Select Payment Method for Monthly", parse_mode='Markdown', reply_markup=keyboard)
             return
 
-        # Lifetime plan 선택
         if query.data == 'select_lifetime' and self.has_lifetime:
             keyboard = payment_keyboard(lang, is_lifetime=True)
             await query.edit_message_text("💳 Select Payment Method for Lifetime", parse_mode='Markdown', reply_markup=keyboard)
             return
 
-        # PayPal 결제
         if query.data.startswith('pay_paypal_'):
             plan = query.data.split('_')[2]
             paypal_link = self.paypal_monthly if plan == 'monthly' else self.paypal_lifetime
@@ -177,7 +168,6 @@ class BaseBot:
                 await query.edit_message_text("❌ PayPal not available for this plan.")
             return
 
-        # Crypto 결제
         if query.data.startswith('pay_crypto_'):
             if CRYPTO_ADDRESS and CRYPTO_QR_URL:
                 text = f"💎 Pay via Crypto\n\nAddress: `{CRYPTO_ADDRESS}`"
@@ -194,7 +184,6 @@ class BaseBot:
                 await query.edit_message_text("❌ Crypto payment not configured.")
             return
 
-        # Stripe 결제
         if query.data.startswith('pay_stripe_'):
             plan = query.data.split('_')[2]
             price_id = self.price_monthly if plan == 'monthly' else self.price_lifetime
@@ -222,7 +211,6 @@ class BaseBot:
                 await query.edit_message_text("❌ Payment error. Please try again or contact support.")
             return
 
-        # Back to main
         if query.data == 'back_to_main':
             await query.edit_message_text("Back to main menu", reply_markup=main_menu_keyboard(lang))
             return
