@@ -72,7 +72,6 @@ async def get_member_status(user_id):
         row = await conn.fetchrow('SELECT * FROM members WHERE user_id = $1 AND active = TRUE', user_id)
     return dict(row) if row else None
 
-# 리포트용 함수
 async def get_near_expiry():
     pool = await get_pool()
     async with pool.acquire() as conn:
