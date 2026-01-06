@@ -1,4 +1,4 @@
-# app.py (최종 - 모든 오류 해결: background async loop 추가)
+# app.py
 import os
 import asyncio
 import logging
@@ -41,7 +41,7 @@ def run_async_loop():
 
 threading.Thread(target=run_async_loop, daemon=True).start()
 
-# Health 체크 엔드포인트
+# Health 체크 엔드포인트 (Render 포트 감지용)
 @flask_app.route('/health')
 def health():
     return "OK", 200
@@ -86,7 +86,6 @@ def stripe_webhook():
         }
         amount = amount_map.get(bot_name, 0)
 
-        # async task in background loop
         asyncio.run_coroutine_threadsafe(handle_payment_success(user_id, username, session, is_lifetime, bot_name, amount), async_loop)
 
     return '', 200
@@ -113,7 +112,6 @@ def telegram_webhook(token):
     try:
         data = request.get_json(force=True)
         update = Update.de_json(data, app.bot)
-        # async task in background loop
         asyncio.run_coroutine_threadsafe(app.process_update(update), async_loop)
     except Exception as e:
         logger.error(f"Telegram update error: {e}")
@@ -158,5 +156,5 @@ if __name__ == "__main__":
         use_reloader=False
     )
 
-    # setup_bots 실행 (Flask 시작 후)
-    threading.Thread(target=setup_bots).start()
+    # setup_bots 실행
+    threading.Thread(target=asyncio.run, args=(setup_bots(),)).start()
