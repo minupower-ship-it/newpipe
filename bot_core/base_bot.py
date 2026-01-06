@@ -7,7 +7,7 @@ from telegram.ext import ContextTypes
 from bot_core.db import get_pool, log_action, get_member_status, add_member
 from bot_core.texts import get_text
 from bot_core.keyboards import main_menu_keyboard, plans_keyboard, payment_keyboard
-from config import STRIPE_SECRET_KEY, CRYPTO_ADDRESS, CRYPTO_QR_URL
+from config import STRIPE_SECRET_KEY, CRYPTO_ADDRESS, CRYPTO_QR_URL, PLAN_PRICES
 
 stripe.api_key = STRIPE_SECRET_KEY
 logger = logging.getLogger(__name__)
@@ -85,13 +85,24 @@ class BaseBot:
             await self.send_welcome_and_menu(query, context, new_lang)
             return
 
-        # View Plans
+        # View Plans - 가격 표시 추가
         if query.data == 'plans':
+            prices = PLAN_PRICES.get(self.bot_name, {'monthly': 'N/A', 'lifetime': 'N/A'})
+            monthly_price = prices.get('monthly', 'N/A')
+            lifetime_price = prices.get('lifetime', 'N/A')
+
+            text = (
+                "🔥 Choose Your Membership Plan 🔥\n\n"
+                f"🔄 Monthly: {monthly_price} / month (recurring, 30 days access)\n"
+                f"💎 Lifetime: {lifetime_price} / permanent access, one-time payment\n\n"
+                "Select your plan below 👇"
+            )
+
             keyboard = plans_keyboard(lang, monthly=self.has_monthly, lifetime=self.has_lifetime)
-            await query.edit_message_text("🔥 Choose Your Membership Plan 🔥", parse_mode='Markdown', reply_markup=keyboard)
+            await query.edit_message_text(text, parse_mode='Markdown', reply_markup=keyboard)
             return
 
-        # My Subscription (status)
+        # My Subscription
         if query.data == 'status':
             pool = await get_pool()
             member = await get_member_status(pool, user_id)
@@ -112,10 +123,9 @@ class BaseBot:
         if query.data == 'help':
             text = (
                 "❓ Help & Support\n\n"
-                "• If you have any questions or issues with payment/access:\n"
-                "• Contact support: @mbrypie\n"
-                "• Or send message directly: https://t.me/mbrypie\n\n"
-                "We're here to help 24/7! 🤝"
+                "• Payment or access issues?\n"
+                "• Contact support directly:\n\n"
+                "👉 @mbrypie"
             )
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("Contact Support", url="https://t.me/mbrypie")]
@@ -198,7 +208,7 @@ class BaseBot:
                 await query.edit_message_text("❌ Payment error. Please try again or contact support.")
             return
 
-        # Back to main (필요 시 추가)
+        # Back to main (필요 시)
         if query.data == 'back_to_main':
             await query.edit_message_text("Back to main menu", reply_markup=main_menu_keyboard(lang))
             return
