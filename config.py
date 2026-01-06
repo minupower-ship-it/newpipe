@@ -1,4 +1,3 @@
-# config.py
 import os
 
 # Stripe
@@ -32,7 +31,7 @@ TSWRLDBOT_PORTAL_RETURN_URL = os.getenv("TSWRLDBOT_PORTAL_RETURN_URL")
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")
 
-# Crypto and PayPal (from env)
+# Crypto and PayPal
 CRYPTO_ADDRESS = os.getenv("CRYPTO_ADDRESS")
 CRYPTO_QR_URL = os.getenv("CRYPTO_QR_URL")
 
@@ -48,11 +47,7 @@ WELCOME_VIDEO_MOREVIDS = os.getenv("WELCOME_VIDEO_MOREVIDS")
 WELCOME_VIDEO_ONLYTRNS = os.getenv("WELCOME_VIDEO_ONLYTRNS")
 WELCOME_VIDEO_TSWRLD = os.getenv("WELCOME_VIDEO_TSWRLD")
 
-# Render External URL (추가: Render 배포 URL)
-RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
-
-# config.py (파일 끝부분에 추가)
-
+# Plan Prices (View Plans에서 가격 표시용)
 PLAN_PRICES = {
     'letmebot': {'monthly': '$20', 'lifetime': '$50'},
     'morevids': {'monthly': '$20', 'lifetime': '$50'},
