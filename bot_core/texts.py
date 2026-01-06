@@ -3,7 +3,7 @@ from datetime import datetime
 
 def current_month_year(lang="EN"):
     now = datetime.utcnow()
-    month = now.strftime("%B")   # 영어 기준 월
+    month = now.strftime("%B")
     year = now.year
 
     if lang == "AR":
@@ -31,6 +31,12 @@ TEXTS = {
             "Our team is always here to support you 🤝\n"
             "Welcome to the ultimate premium experience 🌟"
         ),
+        "morevids_welcome": (
+            "Welcome to Private Collection\n\n"
+            "Enjoy exclusive content, updates, and perks in our private Telegram channel.\n\n"
+            "Choose your plan, pay securely, and get instant access.\n\n"
+            "Support is available 24/7 🤝"
+        ),
         "onlytrns_welcome": (
             "───────────────────────────\n\n"
             "Welcome to Private Collection\n\n"
@@ -41,7 +47,7 @@ TEXTS = {
             "───────────────────────────\n\n"
             "★ Price: $25\n"
             "★ INSTANT ACCESS ★\n\n"
-             "───────────────────────────\n\n"
+            "───────────────────────────\n\n"
             "💡 After payment, please send proof"
         ),
         "tswrld_welcome": (
@@ -54,17 +60,12 @@ TEXTS = {
             "───────────────────────────\n\n"
             "★ Price: $21\n"
             "★ INSTANT ACCESS ★\n\n"
-             "───────────────────────────\n\n"
+            "───────────────────────────\n\n"
             "💡 After payment, please send proof"
         ),
-        "morevids_welcome": (
-            "Welcome to Private Collection\n\n"
-            "Enjoy exclusive content, updates, and perks in our private Telegram channel.\n\n"
-            "Choose your plan, pay securely, and get instant access.\n\n"
-            "Support is available 24/7 🤝"
-        )
     },
     "AR": {
+        # AR translations (same as original)
         "letmebot_welcome": (
             "Welcome to Private Collection\n\n"
             "نحن سعداء جدًا بانضمامك إلينا! 🎉\n\n"
@@ -72,6 +73,12 @@ TEXTS = {
             "اختر خطتك, أكمل الدفع, واحصل على رابط دعوة آمن فوراً.\n\n"
             "فريقنا دائماً هنا لدعمك 🤝\n"
             "مرحباً بك في التجربة المميزة المطلقة 🌟"
+        ),
+        "morevids_welcome": (
+            "Welcome to Private Collection\n\n"
+            "استمتع بالمحتوى الحصري والتحديثات والمزايا في قناتنا الخاصة على تليجرام.\n\n"
+            "اختر خطتك, ادفع بأمان, واحصل على وصول فوري.\n\n"
+            "الدعم متاح 24/7 🤝"
         ),
         "onlytrns_welcome": (
             "───────────────────────────\n\n"
@@ -83,7 +90,7 @@ TEXTS = {
             "───────────────────────────\n\n"
             "★ السعر: $25\n"
             "★ وصول فوري ★\n\n"
-             "───────────────────────────\n\n"
+            "───────────────────────────\n\n"
             "💡 بعد الدفع, يرجى إرسال الإثبات"
         ),
         "tswrld_welcome": (
@@ -96,17 +103,12 @@ TEXTS = {
             "───────────────────────────\n\n"
             "★ السعر: $21\n"
             "★ وصول فوري ★\n\n"
-             "───────────────────────────\n\n"
+            "───────────────────────────\n\n"
             "💡 بعد الدفع, يرجى إرسال الإثبات"
         ),
-        "morevids_welcome": (
-            "Welcome to Private Collection\n\n"
-            "استمتع بالمحتوى الحصري والتحديثات والمزايا في قناتنا الخاصة على تليجرام.\n\n"
-            "اختر خطتك, ادفع بأمان, واحصل على وصول فوري.\n\n"
-            "الدعم متاح 24/7 🤝"
-        )
     },
     "ES": {
+        # ES translations (same as original)
         "letmebot_welcome": (
             "Welcome to Private Collection\n\n"
             "¡Estamos emocionados de tenerte con nosotros! 🎉\n\n"
@@ -114,6 +116,12 @@ TEXTS = {
             "Elige tu plan, completa el pago y obtén acceso instantáneo mediante un enlace de invitación seguro.\n\n"
             "Nuestro equipo siempre está aquí para apoyarte 🤝\n"
             "¡Bienvenido a la experiencia premium definitiva 🌟"
+        ),
+        "morevids_welcome": (
+            "Welcome to Private Collection\n\n"
+            "Disfruta de contenido exclusivo, actualizaciones y beneficios en nuestro canal privado de Telegram.\n\n"
+            "Elige tu plan, paga de forma segura y obtén acceso instantáneo.\n\n"
+            "Soporte disponible 24/7 🤝"
         ),
         "onlytrns_welcome": (
             "───────────────────────────\n\n"
@@ -125,7 +133,7 @@ TEXTS = {
             "───────────────────────────\n\n"
             "★ Precio: $25\n"
             "★ ACCESO INMEDIATO ★\n\n"
-             "───────────────────────────\n\n"
+            "───────────────────────────\n\n"
             "💡 Después del pago, envía comprobante"
         ),
         "tswrld_welcome": (
@@ -138,15 +146,9 @@ TEXTS = {
             "───────────────────────────\n\n"
             "★ Precio: $21\n"
             "★ ACCESO INMEDIATO ★\n\n"
-             "───────────────────────────\n\n"
+            "───────────────────────────\n\n"
             "💡 Después del pago, envía comprobante"
         ),
-        "morevids_welcome": (
-            "Welcome to Private Collection\n\n"
-            "Disfruta de contenido exclusivo, actualizaciones y beneficios en nuestro canal privado de Telegram.\n\n"
-            "Elige tu plan, paga de forma segura y obtén acceso instantáneo.\n\n"
-            "Soporte disponible 24/7 🤝"
-        )
     }
 }
 
