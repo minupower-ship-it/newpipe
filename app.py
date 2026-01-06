@@ -1,7 +1,8 @@
-# app.py (최종 수정 버전)
+# app.py
 import os
 import asyncio
 import logging
+import datetime  # <-- NameError 해결을 위해 추가!
 from flask import Flask, request, abort
 from telegram import Update
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler
@@ -11,13 +12,13 @@ from config import *
 from bot_core.db import init_db, add_member, log_action
 from bot_core.utils import create_invite_link, send_daily_report
 
-# 명시적 import로 핸들러 가져오기 (KeyError 해결!)
+# 명시적 핸들러 import (KeyError 해결)
 from bots.let_mebot import start as letme_start, button_handler as letme_handler
 from bots.morevids_bot import start as morevids_start, button_handler as morevids_handler
 from bots.onlytrns_bot import start as onlytrns_start, button_handler as onlytrns_handler
 from bots.tswrldbot import start as tswrld_start, button_handler as tswrld_handler
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 flask_app = Flask(__name__)
@@ -28,7 +29,7 @@ if not BASE_URL:
 
 PORT = int(os.environ.get("PORT", 10000))
 
-# 봇별 핸들러 매핑
+# 봇 설정
 BOT_HANDLERS = {
     "letme": {"start": letme_start, "handler": letme_handler, "token": LETMEBOT_TOKEN},
     "morevids": {"start": morevids_start, "handler": morevids_handler, "token": MOREVIDS_TOKEN},
@@ -55,8 +56,13 @@ def stripe_webhook():
         bot_name = session['metadata'].get('bot_name', 'unknown')
         username = session.get('customer_details', {}).get('email') or f"user_{user_id}"
 
-        is_lifetime = 'lifetime' in session.get('mode', '')
-        amount_map = {"letmebot": 50 if is_lifetime else 20, "onlytrns": 25, "tswrld": 21, "morevids": 50 if is_lifetime else 20}
+        is_lifetime = session['mode'] == 'payment'
+        amount_map = {
+            "letmebot": 50 if is_lifetime else 20,
+            "onlytrns": 25,
+            "tswrld": 21,
+            "morevids": 50 if is_lifetime else 20,
+        }
         amount = amount_map.get(bot_name, 0)
 
         asyncio.create_task(handle_payment_success(user_id, username, session, is_lifetime, bot_name, amount))
@@ -68,12 +74,12 @@ async def handle_payment_success(user_id, username, session, is_lifetime, bot_na
         await add_member(user_id, username, session.get('customer'), session.get('subscription'), is_lifetime, bot_name)
         await log_action(user_id, f'payment_stripe_{"lifetime" if is_lifetime else "monthly"}', amount, bot_name)
 
-        app = next((a for a in applications.values() if bot_name in str(a.bot.username).lower()), None)
+        app = next((a for a in applications.values() if bot_name in a.bot.username.lower()), None)
         if app:
             link, expiry = await create_invite_link(app.bot)
-            await app.bot.send_message(user_id, f"🎉 Payment successful!\n\nInvite link (expires {expiry}):\n{link}")
+            await app.bot.send_message(user_id, f"🎉 Payment successful!\n\nYour invite link (expires {expiry}):\n{link}")
     except Exception as e:
-        logger.error(f"Payment handling failed: {e}")
+        logger.error(f"Payment handling failed for {user_id}: {e}")
 
 # Telegram Webhook
 @flask_app.route('/webhook/<token>', methods=['POST'])
@@ -86,28 +92,34 @@ def telegram_webhook(token):
         update = Update.de_json(request.get_json(force=True), app.bot)
         asyncio.create_task(app.process_update(update))
     except Exception as e:
-        logger.error(f"Update error: {e}")
+        logger.error(f"Telegram update error: {e}")
+
     return 'OK'
 
 async def setup_bots():
     await init_db()
 
-    for key, handlers in BOT_HANDLERS.items():
-        token = handlers["token"]
+    for key, cfg in BOT_HANDLERS.items():
+        token = cfg["token"]
         app = Application.builder().token(token).build()
 
-        app.add_handler(CommandHandler("start", handlers["start"]))
-        app.add_handler(CallbackQueryHandler(handlers["handler"]))
+        app.add_handler(CommandHandler("start", cfg["start"]))
+        app.add_handler(CallbackQueryHandler(cfg["handler"]))
 
-        # 매일 리포트
-        app.job_queue.run_daily(send_daily_report, time=datetime.time(hour=9, minute=0, tzinfo=datetime.timezone.utc))
+        # 매일 오전 9시 리포트 (UTC)
+        app.job_queue.run_daily(
+            send_daily_report,
+            time=datetime.time(hour=9, minute=0, tzinfo=datetime.timezone.utc)
+        )
 
         webhook_url = f"{BASE_URL}/webhook/{token}"
         try:
             await app.bot.set_webhook(url=webhook_url)
             logger.info(f"{key.upper()} webhook set: {webhook_url}")
+        except TimedOut:
+            logger.warning(f"Webhook set timeout for {key}")
         except Exception as e:
-            logger.warning(f"Webhook set failed for {key}: {e}")
+            logger.error(f"Webhook set failed for {key}: {e}")
 
         await app.initialize()
         await app.start()
