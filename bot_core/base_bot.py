@@ -77,6 +77,7 @@ class BaseBot:
         user_id = query.from_user.id
         lang = await self.get_user_language(user_id)
 
+        # 언어 선택
         if query.data.startswith('lang_'):
             new_lang = query.data.split('_')[1].upper()
             await self.set_user_language(user_id, new_lang)
@@ -84,21 +85,57 @@ class BaseBot:
             await self.send_welcome_and_menu(query, context, new_lang)
             return
 
+        # View Plans
         if query.data == 'plans':
             keyboard = plans_keyboard(lang, monthly=self.has_monthly, lifetime=self.has_lifetime)
             await query.edit_message_text("🔥 Choose Your Membership Plan 🔥", parse_mode='Markdown', reply_markup=keyboard)
             return
 
+        # My Subscription (status)
+        if query.data == 'status':
+            pool = await get_pool()
+            member = await get_member_status(pool, user_id)
+            if member:
+                expiry_text = "Permanent access" if member.get('is_lifetime') else f"Expires: {member.get('expiry').strftime('%Y-%m-%d') if member.get('expiry') else 'N/A'}"
+                text = (
+                    "📊 Your Subscription Status\n\n"
+                    f"• Plan: {'Lifetime' if member.get('is_lifetime') else 'Monthly'}\n"
+                    f"• Payment Date: {member.get('created_at').strftime('%Y-%m-%d')}\n"
+                    f"• {expiry_text}"
+                )
+            else:
+                text = "😔 No active subscription found.\nChoose a plan to begin!"
+            await query.edit_message_text(text, parse_mode='Markdown')
+            return
+
+        # Help & Support
+        if query.data == 'help':
+            text = (
+                "❓ Help & Support\n\n"
+                "• If you have any questions or issues with payment/access:\n"
+                "• Contact support: @mbrypie\n"
+                "• Or send message directly: https://t.me/mbrypie\n\n"
+                "We're here to help 24/7! 🤝"
+            )
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("Contact Support", url="https://t.me/mbrypie")]
+            ])
+            await query.edit_message_text(text, parse_mode='Markdown', reply_markup=keyboard)
+            return
+
+        # Monthly plan 선택
         if query.data == 'select_monthly' and self.has_monthly:
             keyboard = payment_keyboard(lang, is_lifetime=False)
             await query.edit_message_text("💳 Select Payment Method for Monthly", parse_mode='Markdown', reply_markup=keyboard)
             return
 
+        # Lifetime plan 선택
         if query.data == 'select_lifetime' and self.has_lifetime:
             keyboard = payment_keyboard(lang, is_lifetime=True)
             await query.edit_message_text("💳 Select Payment Method for Lifetime", parse_mode='Markdown', reply_markup=keyboard)
             return
 
+        # PayPal 결제
         if query.data.startswith('pay_paypal_'):
             plan = query.data.split('_')[2]
             paypal_link = self.paypal_monthly if plan == 'monthly' else self.paypal_lifetime
@@ -116,6 +153,7 @@ class BaseBot:
                 await query.edit_message_text("❌ PayPal not available for this plan.")
             return
 
+        # Crypto 결제
         if query.data.startswith('pay_crypto_'):
             if CRYPTO_ADDRESS and CRYPTO_QR_URL:
                 text = f"💎 Pay via Crypto\n\nAddress: `{CRYPTO_ADDRESS}`"
@@ -132,6 +170,7 @@ class BaseBot:
                 await query.edit_message_text("❌ Crypto payment not configured.")
             return
 
+        # Stripe 결제
         if query.data.startswith('pay_stripe_'):
             plan = query.data.split('_')[2]
             price_id = self.price_monthly if plan == 'monthly' else self.price_lifetime
@@ -157,4 +196,9 @@ class BaseBot:
             except Exception as e:
                 logger.error(f"Stripe session creation failed for {self.bot_name}: {e}")
                 await query.edit_message_text("❌ Payment error. Please try again or contact support.")
+            return
+
+        # Back to main (필요 시 추가)
+        if query.data == 'back_to_main':
+            await query.edit_message_text("Back to main menu", reply_markup=main_menu_keyboard(lang))
             return
