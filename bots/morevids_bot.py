@@ -28,11 +28,14 @@ PAYPAL_LIFETIME_LINK = "https://www.paypal.com/paypalme/minwookim384/50usd"
 CRYPTO_ADDRESS = "TERhALhVLZRqnS3mZGhE1XgxyLnKHfgBLi"
 CRYPTO_QR = "https://files.catbox.moe/aqlyct.jpg"
 
+# 추가: 환영 동영상 URL
+WELCOME_VIDEO_URL = "https://files.catbox.moe/dt49t2.mp4"
+
 async def get_user_language(user_id):
     conn = await asyncpg.connect(DATABASE_URL)
     row = await conn.fetchrow('SELECT language FROM members WHERE user_id = $1', user_id)
     await conn.close()
-    return row['language'] if row and row['language'] else "EN"
+    return row['language'] if row and row['language'] else None
 
 async def set_user_language(user_id, lang):
     conn = await asyncpg.connect(DATABASE_URL)
@@ -61,7 +64,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
     else:
-        await show_main_menu(update, context, lang)
+        await send_welcome_video_and_menu(update, context, lang)
+
+async def send_welcome_video_and_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    # chat_id 추출
+    if hasattr(update_or_query, 'message'):
+        chat_id = update_or_query.message.chat_id
+    else:  # CallbackQuery
+        chat_id = update_or_query.callback_query.message.chat_id
+
+    # 동영상 먼저 전송 (캡션 없이)
+    await context.bot.send_video(
+        chat_id=chat_id,
+        video=WELCOME_VIDEO_URL
+    )
+
+    # 그 다음 메인 메뉴 전송
+    today = datetime.datetime.utcnow().strftime("%b %d")
+    text = get_text("morevids", lang) + f"\n\n📅 {today} — System Active\n⚡️ Instant Access — Ready"
+    reply_markup = main_menu_keyboard(lang)
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        parse_mode='Markdown',
+        reply_markup=reply_markup
+    )
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
     today = datetime.datetime.utcnow().strftime("%b %d")
@@ -83,7 +111,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_lang = query.data.split('_')[1].upper()
         await set_user_language(user_id, new_lang)
         await query.edit_message_text(f"✅ Language changed to {new_lang}!")
-        await show_main_menu(query, context, new_lang)
+        await send_welcome_video_and_menu(query, context, new_lang)
         return
 
     # Plan 선택
