@@ -50,3 +50,12 @@ WELCOME_VIDEO_TSWRLD = os.getenv("WELCOME_VIDEO_TSWRLD")
 
 # Render External URL (추가: Render 배포 URL)
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
+
+# config.py (파일 끝부분에 추가)
+
+PLAN_PRICES = {
+    'letmebot': {'monthly': '$20', 'lifetime': '$50'},
+    'morevids': {'monthly': '$20', 'lifetime': '$50'},
+    'onlytrns': {'lifetime': '$25'},
+    'tswrld': {'lifetime': '$21'},
+}
