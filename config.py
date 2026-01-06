@@ -54,3 +54,6 @@ PLAN_PRICES = {
     'onlytrns': {'lifetime': '$25'},
     'tswrld': {'lifetime': '$21'},
 }
+
+
+RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
