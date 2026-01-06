@@ -1,7 +1,11 @@
 # bot_core/utils.py
 import datetime
+import logging
+from telegram.ext import ContextTypes
 from config import CHANNEL_ID, ADMIN_USER_ID
-from bot_core.db import get_near_expiry, get_expired_today, get_daily_stats
+from bot_core.db import get_near_expiry, get_expired_today, get_daily_stats, get_pool
+
+logger = logging.getLogger(__name__)
 
 async def create_invite_link(bot):
     expire_date = datetime.datetime.utcnow() + datetime.timedelta(minutes=10)
@@ -12,11 +16,12 @@ async def create_invite_link(bot):
     )
     return link.invite_link, expire_date.strftime('%b %d, %Y %H:%M UTC')
 
-async def send_daily_report(context):
+async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
+    pool = await get_pool()
     today = datetime.datetime.utcnow().strftime("%b %d")
-    stats = await get_daily_stats()
-    near = await get_near_expiry()
-    expired = await get_expired_today()
+    stats = await get_daily_stats(pool)
+    near = await get_near_expiry(pool)
+    expired = await get_expired_today(pool)
 
     message = f"📊 Daily Report - {today}\n\n"
     if near or expired:
@@ -32,4 +37,7 @@ async def send_daily_report(context):
     message += f"👥 Unique visitors: {stats['unique_users']}\n"
     message += f"💰 Revenue today: ${stats['total_revenue']:.2f}"
 
-    await context.bot.send_message(ADMIN_USER_ID, message)
+    try:
+        await context.bot.send_message(ADMIN_USER_ID, message)
+    except Exception as e:
+        logger.error(f"Failed to send daily report: {e}")
