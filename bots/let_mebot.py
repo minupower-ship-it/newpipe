@@ -6,29 +6,32 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 
 from config import *
-from bot_core.db import log_action
+from bot_core.db import log_action, get_member_status
 from bot_core.keyboards import main_menu_keyboard, plans_keyboard, payment_keyboard
 from bot_core.texts import get_text
 
-PORTAL_RETURN_URL = os.environ.get("LETMEBOT_PORTAL_RETURN_URL", "https://t.me/yourbot")
+PORTAL_RETURN_URL = os.environ.get("LETMEBOT_PORTAL_RETURN_URL", "https://t.me/let_mebot")
 
-# 사용자 언어 처리
+CRYPTO_ADDRESS = "TERhALhVLZRqnS3mZGhE1XgxyLnKHfgBLi"
+CRYPTO_QR_PATH = "https://files.catbox.moe/aqlyct.jpg"  # URL로 변경 (파일 경로 대신)
+
+PAYPAL_LINKS = {
+    "monthly": "https://www.paypal.com/paypalme/minwookim384/20usd",
+    "lifetime": "https://www.paypal.com/paypalme/minwookim384/50usd",
+}
+
 async def get_user_language(user_id):
-    from bot_core.db import get_member_status
     status = await get_member_status(user_id)
     return status['language'] if status and status.get('language') else "EN"
 
 async def set_user_language(user_id, lang):
-    from bot_core.db import get_pool
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO members (user_id, language) VALUES ($1, $2) "
-            "ON CONFLICT (user_id) DO UPDATE SET language = $2",
+            'INSERT INTO members (user_id, language) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET language=$2',
             user_id, lang
         )
 
-# /start 명령어
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     await log_action(user_id, 'start', bot_name='letmebot')
@@ -56,21 +59,14 @@ async def show_main_menu(update_or_query, context: ContextTypes.DEFAULT_TYPE, la
     text = get_text("letmebot", lang) + f"\n\n📅 {today} — System Active\n⚡️ Instant Access — Ready"
     reply_markup = main_menu_keyboard(lang)
 
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=text,
-        parse_mode='Markdown',
-        reply_markup=reply_markup
-    )
+    await context.bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown', reply_markup=reply_markup)
 
-# 버튼 핸들러
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
     lang = await get_user_language(user_id)
 
-    # 언어 선택
     if query.data.startswith('lang_'):
         new_lang = query.data.split('_')[1].upper()
         await set_user_language(user_id, new_lang)
@@ -78,7 +74,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await show_main_menu(query, context, new_lang)
         return
 
-    # Plans
     if query.data == 'plans':
         keyboard = plans_keyboard(lang, monthly=True, lifetime=True)
         await query.edit_message_text("🔥 Choose Your Membership Plan 🔥", parse_mode='Markdown', reply_markup=keyboard)
@@ -94,31 +89,23 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("💳 Select Payment Method for Lifetime ($50)", parse_mode='Markdown', reply_markup=keyboard)
         return
 
-    # PayPal
     if query.data == 'pay_paypal_monthly':
         await query.edit_message_text(
             "💲 Pay via PayPal (Monthly $20)",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Pay Now", url="https://www.paypal.com/paypalme/minwookim384/20usd")]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Pay Now", url=PAYPAL_LINKS["monthly"])]]),
+            parse_mode='Markdown'
         )
     elif query.data == 'pay_paypal_lifetime':
         await query.edit_message_text(
             "💲 Pay via PayPal (Lifetime $50)",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Pay Now", url="https://www.paypal.com/paypalme/minwookim384/50usd")]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Pay Now", url=PAYPAL_LINKS["lifetime"])]]),
+            parse_mode='Markdown'
         )
+    elif query.data == 'pay_crypto':
+        await query.edit_message_text(f"💰 Send crypto payment to this address:\n`{CRYPTO_ADDRESS}`", parse_mode='Markdown')
+        await query.message.reply_photo(CRYPTO_QR_PATH)
 
-    # Crypto
-    elif query.data.startswith('pay_crypto'):
-        text = "💎 Pay via Crypto\n\nAddress: `TERhALhVLZRqnS3mZGhE1XgxyLnKHfgBLi`"
-        await query.edit_message_text(
-            text,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("QR Code", url="https://files.catbox.moe/aqlyct.jpg")]])
-        )
-
-    # Stripe
-    elif query.data.startswith('pay_stripe_'):
+    if query.data.startswith('pay_stripe_'):
         plan_type = query.data.split('_')[2]
         price_id = LETMEBOT_PRICE_MONTHLY if plan_type == 'monthly' else LETMEBOT_PRICE_LIFETIME
         mode = 'subscription' if plan_type == 'monthly' else 'payment'
@@ -129,7 +116,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mode=mode,
             success_url=PORTAL_RETURN_URL,
             cancel_url=PORTAL_RETURN_URL,
-            metadata={'user_id': str(user_id), 'bot_name': 'letmebot'}
+            metadata={'user_id': user_id, 'bot_name': 'letmebot'}
         )
         await query.edit_message_text(
             "🔒 Redirecting to secure Stripe checkout...",
