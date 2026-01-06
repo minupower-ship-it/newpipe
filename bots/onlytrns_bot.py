@@ -1,31 +1,35 @@
 # bots/onlytrns_bot.py
+import os
 import asyncio
 import datetime
 import stripe
+from flask import Flask, request, abort
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 from config import *
-from bot_core.db import log_action
-from bot_core.keyboards import main_menu_keyboard
+from bot_core.db import init_db, add_member, log_action, get_member_status
+from bot_core.keyboards import main_menu_keyboard, payment_keyboard
 from bot_core.texts import get_text
 
-PORTAL_RETURN_URL = os.environ.get("ONLYTRNS_PORTAL_RETURN_URL", "https://t.me/yourbot")
+PORTAL_RETURN_URL = os.environ.get("ONLYTRNS_PORTAL_RETURN_URL", "https://t.me/onlytrns_bot")
+
+PAYPAL_LINK = "https://www.paypal.com/paypalme/minwookim384/25usd"
+CRYPTO_ADDRESS = "TERhALhVLZRqnS3mZGhE1XgxyLnKHfgBLi"
+CRYPTO_QR = "https://files.catbox.moe/aqlyct.jpg"
 
 WELCOME_VIDEO_URL = "https://files.catbox.moe/8ku53d.mp4"
 
 async def get_user_language(user_id):
-    from bot_core.db import get_member_status
-    status = await get_member_status(user_id)
-    return status['language'] if status and status.get('language') else "EN"
+    row = await get_member_status(user_id)
+    return row['language'] if row and row['language'] else "EN"
 
 async def set_user_language(user_id, lang):
-    from bot_core.db import get_pool
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            "INSERT INTO members (user_id, language) VALUES ($1, $2) "
-            "ON CONFLICT (user_id) DO UPDATE SET language = $2",
+            'INSERT INTO members (user_id, language) VALUES ($1, $2) ON CONFLICT (user_id) DO UPDATE SET language=$2',
             user_id, lang
         )
 
@@ -82,16 +86,18 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data == 'pay_paypal':
         await query.edit_message_text(
             "💲 Pay via PayPal (Lifetime $25)",
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Pay Now", url="https://www.paypal.com/paypalme/minwookim384/25usd")]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Pay Now", url=PAYPAL_LINK)]]),
+            parse_mode='Markdown'
         )
+
     elif query.data == 'pay_crypto':
-        text = "💎 Pay via Crypto\n\nAddress: `TERhALhVLZRqnS3mZGhE1XgxyLnKHfgBLi`"
+        text = f"💎 Pay via Crypto\n\nAddress: `{CRYPTO_ADDRESS}`"
         await query.edit_message_text(
             text,
-            parse_mode='Markdown',
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("QR Code", url="https://files.catbox.moe/aqlyct.jpg")]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("QR Code", url=CRYPTO_QR)]]),
+            parse_mode='Markdown'
         )
+
     elif query.data == 'pay_stripe':
         session = stripe.checkout.Session.create(
             payment_method_types=['card'],
@@ -99,7 +105,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mode='payment',
             success_url=PORTAL_RETURN_URL,
             cancel_url=PORTAL_RETURN_URL,
-            metadata={'user_id': str(user_id), 'bot_name': 'onlytrns'}
+            metadata={'user_id': user_id, 'bot_name': 'onlytrns'}
         )
         await query.edit_message_text(
             "🔒 Redirecting to secure Stripe checkout...",
