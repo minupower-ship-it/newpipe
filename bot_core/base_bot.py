@@ -103,9 +103,13 @@ class BaseBot:
             plan = query.data.split('_')[2]
             paypal_link = self.paypal_monthly if plan == 'monthly' else self.paypal_lifetime
             if paypal_link:
+                buttons = [
+                    [InlineKeyboardButton("Pay Now", url=paypal_link)],
+                    [InlineKeyboardButton("Send proof here", url="https://t.me/mbrypie")]
+                ]
                 await query.edit_message_text(
                     f"💲 Pay via PayPal ({plan.capitalize()})",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Pay Now", url=paypal_link)]]),
+                    reply_markup=InlineKeyboardMarkup(buttons),
                     parse_mode='Markdown'
                 )
             else:
@@ -115,9 +119,13 @@ class BaseBot:
         if query.data.startswith('pay_crypto_'):
             if CRYPTO_ADDRESS and CRYPTO_QR_URL:
                 text = f"💎 Pay via Crypto\n\nAddress: `{CRYPTO_ADDRESS}`"
+                buttons = [
+                    [InlineKeyboardButton("QR Code", url=CRYPTO_QR_URL)],
+                    [InlineKeyboardButton("Send proof here", url="https://t.me/mbrypie")]
+                ]
                 await query.edit_message_text(
                     text,
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("QR Code", url=CRYPTO_QR_URL)]]),
+                    reply_markup=InlineKeyboardMarkup(buttons),
                     parse_mode='Markdown'
                 )
             else:
@@ -137,10 +145,14 @@ class BaseBot:
                     cancel_url=self.portal_return_url,
                     metadata={'user_id': user_id, 'bot_name': self.bot_name}
                 )
+                buttons = [
+                    [InlineKeyboardButton("💳 Pay Now", url=session.url)],
+                    [InlineKeyboardButton("Help", url="https://t.me/mbrypie")]
+                ]
                 await query.edit_message_text(
                     f"🔒 Redirecting to secure Stripe checkout ({plan.capitalize()})...",
                     parse_mode='Markdown',
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("💳 Pay Now", url=session.url)]])
+                    reply_markup=InlineKeyboardMarkup(buttons)
                 )
             except Exception as e:
                 logger.error(f"Stripe session creation failed for {self.bot_name}: {e}")
