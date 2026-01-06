@@ -2,11 +2,14 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 def main_menu_keyboard(lang="EN"):
-    return InlineKeyboardMarkup([
+    """메인 메뉴 버튼 (plans / status / help + Change Language)"""
+    buttons = [
         [InlineKeyboardButton("📦 View Plans", callback_data='plans')],
         [InlineKeyboardButton("📊 My Subscription", callback_data='status')],
-        [InlineKeyboardButton("❓ Help & Support", callback_data='help')]
-    ])
+        [InlineKeyboardButton("❓ Help & Support", callback_data='help')],
+        [InlineKeyboardButton("🌍 Change Language", callback_data='change_language')]
+    ]
+    return InlineKeyboardMarkup(buttons)
 
 def plans_keyboard(lang="EN", monthly=True, lifetime=True):
     buttons = []
