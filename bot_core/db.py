@@ -3,16 +3,10 @@ import asyncpg
 import datetime
 from config import DATABASE_URL
 
-_pool = None
-
 async def get_pool():
-    global _pool
-    if _pool is None:
-        _pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
-    return _pool
+    return await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=10)
 
-async def init_db():
-    pool = await get_pool()
+async def init_db(pool):
     async with pool.acquire() as conn:
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS members (
@@ -39,9 +33,8 @@ async def init_db():
             );
         ''')
 
-async def add_member(user_id, username, customer_id=None, subscription_id=None, is_lifetime=False, bot_name='unknown'):
+async def add_member(pool, user_id, username, customer_id=None, subscription_id=None, is_lifetime=False, bot_name='unknown'):
     expiry = None if is_lifetime else (datetime.datetime.utcnow() + datetime.timedelta(days=30))
-    pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute('''
             INSERT INTO members (
@@ -58,22 +51,19 @@ async def add_member(user_id, username, customer_id=None, subscription_id=None, 
                 bot_name = EXCLUDED.bot_name
         ''', user_id, username, customer_id, subscription_id, is_lifetime, expiry, bot_name)
 
-async def log_action(user_id, action, amount=0, bot_name='unknown'):
-    pool = await get_pool()
+async def log_action(pool, user_id, action, amount=0, bot_name='unknown'):
     async with pool.acquire() as conn:
         await conn.execute('''
             INSERT INTO daily_logs (user_id, action, amount, bot_name)
             VALUES ($1, $2, $3, $4)
         ''', user_id, action, amount, bot_name)
 
-async def get_member_status(user_id):
-    pool = await get_pool()
+async def get_member_status(pool, user_id):
     async with pool.acquire() as conn:
         row = await conn.fetchrow('SELECT * FROM members WHERE user_id = $1 AND active = TRUE', user_id)
     return dict(row) if row else None
 
-async def get_near_expiry():
-    pool = await get_pool()
+async def get_near_expiry(pool):
     async with pool.acquire() as conn:
         rows = await conn.fetch('''
             SELECT user_id, username, (expiry::date - CURRENT_DATE) AS days_left
@@ -82,8 +72,7 @@ async def get_near_expiry():
         ''')
     return [(r['user_id'], r['username'] or f"ID{r['user_id']}", r['days_left']) for r in rows]
 
-async def get_expired_today():
-    pool = await get_pool()
+async def get_expired_today(pool):
     async with pool.acquire() as conn:
         rows = await conn.fetch('''
             SELECT user_id, username FROM members
@@ -91,8 +80,7 @@ async def get_expired_today():
         ''')
     return [(r['user_id'], r['username'] or f"ID{r['user_id']}") for r in rows]
 
-async def get_daily_stats():
-    pool = await get_pool()
+async def get_daily_stats(pool):
     today = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     async with pool.acquire() as conn:
         row = await conn.fetchrow('''
