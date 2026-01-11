@@ -8,7 +8,8 @@ async def get_pool():
     async with pool.acquire() as conn:
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS members (
-                user_id BIGINT PRIMARY KEY,
+                user_id BIGINT,
+                bot_name TEXT NOT NULL,
                 username TEXT,
                 stripe_customer_id TEXT,
                 stripe_subscription_id TEXT,
@@ -16,8 +17,8 @@ async def get_pool():
                 expiry TIMESTAMP,
                 active BOOLEAN DEFAULT TRUE,
                 language TEXT DEFAULT 'EN',
-                bot_name TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, bot_name)
             );
         ''')
         await conn.execute('''
@@ -33,51 +34,44 @@ async def get_pool():
     await conn.execute('''
         ALTER TABLE daily_logs
         ADD COLUMN IF NOT EXISTS bot_name TEXT;
-    ''')
-
-    # 추가: members에 bot_name 컬럼 없으면 추가 (새로, DEFAULT로 NOT NULL 대응)
-    await conn.execute('''
-        ALTER TABLE members
-        ADD COLUMN IF NOT EXISTS bot_name TEXT NOT NULL DEFAULT 'unknown';
     ''')async def add_member(pool, user_id, username, customer_id=None, subscription_id=None, is_lifetime=False, expiry=None, bot_name='unknown'):
     if expiry is None:
         expiry = None if is_lifetime else (datetime.datetime.utcnow() + datetime.timedelta(days=30))
     async with pool.acquire() as conn:
         await conn.execute('''
             INSERT INTO members (
-                user_id, username, stripe_customer_id, stripe_subscription_id,
-                is_lifetime, expiry, active, language, bot_name
-            ) VALUES ($1, $2, $3, $4, $5, $6, TRUE, 'EN', $7)
-            ON CONFLICT (user_id) DO UPDATE SET
+                user_id, bot_name, username, stripe_customer_id, stripe_subscription_id,
+                is_lifetime, expiry, active, language
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, 'EN')
+            ON CONFLICT (user_id, bot_name) DO UPDATE SET
                 username = EXCLUDED.username,
                 stripe_customer_id = COALESCE(EXCLUDED.stripe_customer_id, members.stripe_customer_id),
                 stripe_subscription_id = COALESCE(EXCLUDED.stripe_subscription_id, members.stripe_subscription_id),
                 is_lifetime = members.is_lifetime OR EXCLUDED.is_lifetime,
                 expiry = EXCLUDED.expiry,
-                active = TRUE,
-                bot_name = EXCLUDED.bot_name
-        ''', user_id, username, customer_id, subscription_id, is_lifetime, expiry, bot_name)async def log_action(pool, user_id, action, amount=0, bot_name='unknown'):
+                active = TRUE
+        ''', user_id, bot_name, username, customer_id, subscription_id, is_lifetime, expiry)async def log_action(pool, user_id, action, amount=0, bot_name='unknown'):
     async with pool.acquire() as conn:
         await conn.execute('''
             INSERT INTO daily_logs (user_id, action, amount, bot_name)
             VALUES ($1, $2, $3, $4)
-        ''', user_id, action, amount, bot_name)async def get_member_status(pool, user_id):
+        ''', user_id, action, amount, bot_name)async def get_member_status(pool, user_id, bot_name):
     async with pool.acquire() as conn:
-        row = await conn.fetchrow('SELECT * FROM members WHERE user_id = $1 AND active = TRUE', user_id)
+        row = await conn.fetchrow('SELECT * FROM members WHERE user_id = $1 AND bot_name = $2 AND active = TRUE', user_id, bot_name)
     return dict(row) if row else Noneasync def get_near_expiry(pool):
     async with pool.acquire() as conn:
         rows = await conn.fetch('''
-            SELECT user_id, username, (expiry::date - CURRENT_DATE) AS days_left
+            SELECT user_id, username, bot_name, (expiry::date - CURRENT_DATE) AS days_left
             FROM members
             WHERE active = TRUE AND NOT is_lifetime AND (expiry::date - CURRENT_DATE) IN (1, 3)
         ''')
-    return [(r['user_id'], r['username'] or f"ID{r['user_id']}", r['days_left']) for r in rows]async def get_expired_today(pool):
+    return [(r['user_id'], r['username'] or f"ID{r['user_id']}", r['bot_name'], r['days_left']) for r in rows]async def get_expired_today(pool):
     async with pool.acquire() as conn:
         rows = await conn.fetch('''
-            SELECT user_id, username FROM members
+            SELECT user_id, username, bot_name FROM members
             WHERE active = TRUE AND NOT is_lifetime AND expiry::date = CURRENT_DATE
         ''')
-    return [(r['user_id'], r['username'] or f"ID{r['user_id']}") for r in rows]async def get_daily_stats(pool):
+    return [(r['user_id'], r['username'] or f"ID{r['user_id']}", r['bot_name']) for r in rows]async def get_daily_stats(pool):
     today = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     async with pool.acquire() as conn:
         row = await conn.fetchrow('''
@@ -88,4 +82,32 @@ async def get_pool():
             WHERE timestamp >= $1
         ''', today)
     return {'unique_users': row['unique_users'] or 0, 'total_revenue': float(row['total_revenue'] or 0)}
+</DOCUMENT><DOCUMENT filename="keyboards.py">
+# bot_core/keyboards.py
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+def main_menu_keyboard(lang="EN"):
+    """메인 메뉴 버튼 (plans / status / help + Change Language)"""
+    buttons = [
+        [InlineKeyboardButton(" View Plans", callback_data='plans')],
+        [InlineKeyboardButton(" My Subscription", callback_data='status')],
+        [InlineKeyboardButton(" Help & Support", callback_data='help')],
+        [InlineKeyboardButton(" Change Language", callback_data='change_language')]
+    ]
+    return InlineKeyboardMarkup(buttons)def plans_keyboard(lang="EN", monthly=True, lifetime=True, weekly=False):
+    buttons = []
+    if weekly:
+        buttons.append([InlineKeyboardButton(" Weekly", callback_data='select_weekly')])
+    if monthly:
+        buttons.append([InlineKeyboardButton(" Monthly", callback_data='select_monthly')])
+    if lifetime:
+        buttons.append([InlineKeyboardButton(" Lifetime", callback_data='select_lifetime')])
+    buttons.append([InlineKeyboardButton(" Back", callback_data='back_to_main')])
+    return InlineKeyboardMarkup(buttons)def payment_keyboard(lang="EN", plan='monthly'):
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(" Stripe", callback_data=f'pay_stripe_{plan}')],
+        [InlineKeyboardButton(" PayPal", callback_data=f'pay_paypal_{plan}')],
+        [InlineKeyboardButton("₿ Crypto", callback_data=f'pay_crypto_{plan}')],
+        [InlineKeyboardButton(" Back", callback_data='plans')]
+    ])
 
