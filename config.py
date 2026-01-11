@@ -59,14 +59,14 @@ logger = logging.getLogger(name)class BaseBot:
         self.has_weekly = has_weekly
         self.portal_return_url = portal_return_urlasync def get_user_language(self, user_id):
     pool = await get_pool()
-    row = await get_member_status(pool, user_id)
+    row = await get_member_status(pool, user_id, self.bot_name)
     return row.get('language', "EN") if row else "EN"
 
 async def set_user_language(self, user_id, lang):
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
-            'INSERT INTO members (user_id, language, bot_name) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET language=$2',
+            'INSERT INTO members (user_id, language, bot_name) VALUES ($1, $2, $3) ON CONFLICT (user_id, bot_name) DO UPDATE SET language=$2',
             user_id, lang, self.bot_name
         )
 
@@ -143,17 +143,24 @@ async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYP
 
     if query.data == 'status':
         pool = await get_pool()
-        row = await get_member_status(pool, user_id)
+        row = await get_member_status(pool, user_id, self.bot_name)
         if row:
             is_lifetime = row['is_lifetime']
+            subscription_id = row['stripe_subscription_id']
             expiry = row['expiry']
             created_at = row['created_at']
+            if is_lifetime:
+                plan_name = 'Lifetime'
+            elif subscription_id:
+                plan_name = 'Monthly'
+            else:
+                plan_name = 'Weekly'
             expiry_text = "Expiry: Permanent" if is_lifetime else f"Expiry: {expiry.strftime('%Y-%m-%d')}" if expiry else "N/A"
             payment_date = created_at.strftime('%Y-%m-%d') if created_at else "N/A"
             
             text = (
                 " Your Subscription Status\n\n"
-                f"• Plan: {'Lifetime' if is_lifetime else 'Monthly'}\n"
+                f"• Plan: {plan_name}\n"
                 f"• Payment Date: {payment_date}\n"
                 f"• {expiry_text}"
             )
