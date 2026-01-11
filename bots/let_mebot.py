@@ -1,17 +1,21 @@
 # bots/let_mebot.py
 from bot_core.base_bot import BaseBot
-from config import LETMEBOT_TOKEN, LETMEBOT_PRICE_MONTHLY, LETMEBOT_PRICE_LIFETIME, LETMEBOT_PORTAL_RETURN_URL, PAYPAL_LETME_MONTHLY, PAYPAL_LETME_LIFETIME
+from config import LETMEBOT_TOKEN, LETMEBOT_PRICE_MONTHLY, LETMEBOT_PRICE_LIFETIME, LETMEBOT_PRICE_WEEKLY, LETMEBOT_PORTAL_RETURN_URL, PAYPAL_LETME_MONTHLY, PAYPAL_LETME_LIFETIME, PAYPAL_LETME_WEEKLY
 
 class LetMeBot(BaseBot):
-    def __init__(self):
-        super().__init__(
+    def init(self):
+        super().init(
             bot_name='letmebot',
             token=LETMEBOT_TOKEN,
+            price_weekly=LETMEBOT_PRICE_WEEKLY,
             price_monthly=LETMEBOT_PRICE_MONTHLY,
             price_lifetime=LETMEBOT_PRICE_LIFETIME,
+            paypal_weekly=PAYPAL_LETME_WEEKLY,
             paypal_monthly=PAYPAL_LETME_MONTHLY,
             paypal_lifetime=PAYPAL_LETME_LIFETIME,
+            has_weekly=True,
             has_monthly=True,
             has_lifetime=True,
             portal_return_url=LETMEBOT_PORTAL_RETURN_URL
         )
+
