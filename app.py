@@ -1,4 +1,3 @@
-# app.py
 import os
 import datetime
 import logging
@@ -121,3 +120,4 @@ await telegram_app.process_update(update)
 return "OK"if name == "main":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+
