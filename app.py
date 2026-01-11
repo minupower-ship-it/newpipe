@@ -1,88 +1,56 @@
-# app.py (handle_payment_success 함수와 stripe_webhook 일부만 변경)
+# app.py
 
-# ... (위쪽 코드 동일)
+import os
+import datetime
+import logging
+import stripe
+from fastapi import FastAPI, Request, HTTPException
+from telegram import Update
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.error import TimedOut
+from bot_core.db import get_pool, init_db, add_member, log_action
+from bot_core.utils import create_invite_link, send_daily_report
+from bots.let_mebot import LetMeBot
+from bots.morevids_bot import MoreVidsBot
+from bots.onlytrns_bot import OnlyTrnsBot
+from bots.tswrldbot import TsWrldBot
+from config import STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID, LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN
+
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# ← 여기서 app을 먼저 정의해야 모든 데코레이터가 정상 동작!
+app = FastAPI()
+
+# 이제 BOT_CLASSES, applications, 그리고 모든 @app 데코레이터를 아래에 배치
+BOT_CLASSES = {
+    "letmebot": {"cls": LetMeBot, "token": LETMEBOT_TOKEN},
+    "morevids": {"cls": MoreVidsBot, "token": MOREVIDS_TOKEN},
+    "onlytrns": {"cls": OnlyTrnsBot, "token": ONLYTRNS_TOKEN},
+    "tswrld": {"cls": TsWrldBot, "token": TSWRLDBOT_TOKEN},
+}
+
+applications = {}
+
+@app.on_event("startup")
+async def startup_event():
+    # ... (기존 코드 그대로)
+
+@app.get("/health")
+async def health():
+    return "OK"
 
 @app.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
-    payload = await request.body()
-    sig_header = request.headers.get('Stripe-Signature')
-    try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, STRIPE_WEBHOOK_SECRET
-        )
-    except Exception as e:
-        logger.error(f"Stripe webhook error: {e}")
-        raise HTTPException(status_code=400)
+    # ... (기존 webhook 코드)
 
-    if event['type'] == 'checkout.session.completed':
-        session = event['data']['object']
-        user_id = int(session['metadata']['user_id'])
-        bot_name = session['metadata'].get('bot_name', 'unknown')
-        plan = session['metadata'].get('plan', 'unknown')
-        # username을 metadata에서 가져오거나, fallback으로 user_id 사용
-        username = session['metadata'].get('username', f"user_{user_id}")
-        now = datetime.datetime.utcnow()
-        if plan == 'lifetime':
-            is_lifetime = True
-            expiry = None
-        else:
-            is_lifetime = False
-            expiry = now + datetime.timedelta(
-                days=30 if plan == 'monthly' else 7 if plan == 'weekly' else 0
-            )
-        # amount_map은 유지하되, 알림은 무조건 보내기 위해 amount 계산은 옵션
-        amount_map = {
-            "letmebot": {"weekly": 10, "monthly": 20, "lifetime": 50},
-            "morevids": {"weekly": 10, "monthly": 20, "lifetime": 50},
-            "onlytrns": {"lifetime": 25},
-            "tswrld": {"lifetime": 21},
-        }
-        amount = amount_map.get(bot_name, {}).get(plan, 0)
-        await handle_payment_success(
-            user_id, username, session, is_lifetime, expiry, bot_name, plan, amount
-        )
+async def handle_payment_success(...):
+    # ... (기존 함수)
 
-    return "", 200
+@app.post("/webhook/{token}")
+async def telegram_webhook(token: str, request: Request):
+    # ... (기존 webhook 코드)
 
-async def handle_payment_success(user_id, username, session, is_lifetime, expiry, bot_name, plan, amount):
-    pool = await get_pool()
-    try:
-        await add_member(
-            pool, user_id, username,
-            session.get('customer'), session.get('subscription'),
-            is_lifetime, expiry, bot_name
-        )
-        await log_action(pool, user_id, f'payment_stripe_{plan}', amount, bot_name)
-
-        # 사용자에게 성공 메시지
-        app_info = next(
-            (a for a in applications.values() if a["bot_instance"].bot_name == bot_name),
-            None
-        )
-        if app_info:
-            bot = app_info["app"].bot
-            link, expiry_str = await create_invite_link(bot)
-            await bot.send_message(
-                user_id,
-                f"🎉 Payment successful!\n\nYour invite link (expires {expiry_str}):\n{link}\n\nWelcome!"
-            )
-
-        # ★★★ 관리자에게 알림 ★★★ (모든 봇에 무조건 보내기 + @username 표시)
-        plan_type = plan.capitalize()
-        payment_date = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
-        expire_date = "Permanent" if is_lifetime else (expiry.strftime('%Y-%m-%d') if expiry else "N/A")
-        admin_text = (
-            f"🔔 New Stripe Payment!\n\n"
-            f"User ID: {user_id}\n"
-            f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"  # @ 붙여서 표시
-            f"Bot: {bot_name}\n"
-            f"Plan: {plan_type}\n"
-            f"Payment Date: {payment_date}\n"
-            f"Expire Date: {expire_date}\n"
-            f"Amount: ${amount}"
-        )
-        # ADMIN_USER_ID로 알림 전송 (bot 변수는 app_info에서 가져온 bot 사용)
-        await bot.send_message(ADMIN_USER_ID, admin_text)
-
-    except Exception as e:
-        logger.error(f"Payment handling failed for {user_id} ({bot_name}): {e}")
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
