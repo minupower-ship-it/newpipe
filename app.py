@@ -15,7 +15,7 @@ from bots.tswrldbot import TsWrldBot
 from config import STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(name)app = FastAPI()BOT_CLASSES = {
+logger = logging.getLogger(name)\napp = FastAPI()BOT_CLASSES = {
     "letmebot": {"cls": LetMeBot, "token": LetMeBot().token},
     "morevids": {"cls": MoreVidsBot, "token": MoreVidsBot().token},
     "onlytrns": {"cls": OnlyTrnsBot, "token": OnlyTrnsBot().token},
