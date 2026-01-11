@@ -8,13 +8,13 @@ from bot_core.db import get_near_expiry, get_expired_today, get_daily_stats, get
 logger = logging.getLogger(__name__)
 
 async def create_invite_link(bot):
-    expire_date = datetime.datetime.utcnow() + datetime.timedelta(minutes=10)
+    # 구독 플랜(Weekly/Monthly/Lifetime)은 모두 영구 초대 링크 (expire_date 없음, member_limit 무제한)
     link = await bot.create_chat_invite_link(
         chat_id=CHANNEL_ID,
-        expire_date=int(expire_date.timestamp()),
-        member_limit=1
+        member_limit=0,  # 0 = 무제한
+        # expire_date=None → 만료 날짜 없음 (영구)
     )
-    return link.invite_link, expire_date.strftime('%b %d, %Y %H:%M UTC')
+    return link.invite_link, "영구 (구독 유지 중인 동안 유효)"
 
 async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
     pool = await get_pool()
