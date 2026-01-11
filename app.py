@@ -80,7 +80,8 @@ async def stripe_webhook(request: Request):
     amount = amount_map.get(bot_name, {}).get(plan, 0)
     await handle_payment_success(user_id, username, session, is_lifetime, expiry, bot_name, plan, amount)
 
-return "", 200async def handle_payment_success(user_id, username, session, is_lifetime, expiry, bot_name, plan, amount):
+return "", 200
+async def handle_payment_success(user_id, username, session, is_lifetime, expiry, bot_name, plan, amount):
     pool = await get_pool()
     try:
         await add_member(pool, user_id, username, session.get('customer'), session.get('subscription'), is_lifetime, expiry, bot_name)
