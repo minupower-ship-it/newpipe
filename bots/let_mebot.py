@@ -3,8 +3,8 @@ from bot_core.base_bot import BaseBot
 from config import LETMEBOT_TOKEN, LETMEBOT_PRICE_MONTHLY, LETMEBOT_PRICE_LIFETIME, LETMEBOT_PRICE_WEEKLY, LETMEBOT_PORTAL_RETURN_URL, PAYPAL_LETME_MONTHLY, PAYPAL_LETME_LIFETIME, PAYPAL_LETME_WEEKLY
 
 class LetMeBot(BaseBot):
-    def init(self):
-        super().init(
+    def __init__(self):
+        super().__init__(
             bot_name='letmebot',
             token=LETMEBOT_TOKEN,
             price_weekly=LETMEBOT_PRICE_WEEKLY,
@@ -18,4 +18,3 @@ class LetMeBot(BaseBot):
             has_lifetime=True,
             portal_return_url=LETMEBOT_PORTAL_RETURN_URL
         )
-
