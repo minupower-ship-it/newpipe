@@ -7,7 +7,6 @@ from bot_core.db import get_near_expiry, get_expired_today, get_daily_stats, get
 
 logger = logging.getLogger(__name__)
 
-
 async def create_invite_link(bot):
     expire_date = datetime.datetime.utcnow() + datetime.timedelta(minutes=10)
     link = await bot.create_chat_invite_link(
@@ -16,7 +15,6 @@ async def create_invite_link(bot):
         member_limit=1
     )
     return link.invite_link, expire_date.strftime('%b %d, %Y %H:%M UTC')
-
 
 async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
     pool = await get_pool()
