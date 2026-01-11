@@ -1,3 +1,4 @@
+# bot_core/base_bot.py
 import datetime
 import logging
 import stripe
@@ -43,7 +44,7 @@ class BaseBot:
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         pool = await get_pool()
         user_id = update.effective_user.id
-        username = update.effective_user.username or f"user_{user_id}"  # username None 방지
+        username = update.effective_user.username or f"user_{user_id}"
         await log_action(pool, user_id, 'start', bot_name=self.bot_name)
         lang = await self.get_user_language(user_id)
 
@@ -122,9 +123,9 @@ class BaseBot:
                 if is_lifetime:
                     plan_name = 'Lifetime'
                 elif subscription_id:
-                    plan_name = 'Monthly'
+                    plan_name = 'Monthly / Weekly Subscription'
                 else:
-                    plan_name = 'Weekly'
+                    plan_name = 'Unknown'
                 expiry_text = "Expiry: Permanent" if is_lifetime else f"Expiry: {expiry.strftime('%Y-%m-%d')}" if expiry else "N/A"
                 payment_date = created_at.strftime('%Y-%m-%d') if created_at else "N/A"
                 
@@ -204,7 +205,8 @@ class BaseBot:
         if query.data.startswith('pay_stripe_'):
             plan = query.data.split('_')[2]
             price_id = self.price_weekly if plan == 'weekly' else self.price_monthly if plan == 'monthly' else self.price_lifetime
-            mode = 'subscription' if plan == 'monthly' else 'payment'
+            # Weekly와 Monthly 모두 subscription으로 변경 (Lifetime만 payment)
+            mode = 'subscription' if plan in ['weekly', 'monthly'] else 'payment'
             try:
                 session = stripe.checkout.Session.create(
                     payment_method_types=['card'],
