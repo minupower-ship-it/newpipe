@@ -13,7 +13,7 @@ from bots.let_mebot import LetMeBot
 from bots.morevids_bot import MoreVidsBot
 from bots.onlytrns_bot import OnlyTrnsBot
 from bots.tswrldbot import TsWrldBot
-from config import STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID
+from config import STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID, LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 BOT_CLASSES = {
-    "letmebot": {"cls": LetMeBot, "token": LetMeBot().token},
-    "morevids": {"cls": MoreVidsBot, "token": MoreVidsBot().token},
-    "onlytrns": {"cls": OnlyTrnsBot, "token": OnlyTrnsBot().token},
-    "tswrld": {"cls": TsWrldBot, "token": TsWrldBot().token},
+    "letmebot": {"cls": LetMeBot, "token": LETMEBOT_TOKEN},
+    "morevids": {"cls": MoreVidsBot, "token": MOREVIDS_TOKEN},
+    "onlytrns": {"cls": OnlyTrnsBot, "token": ONLYTRNS_TOKEN},
+    "tswrld": {"cls": TsWrldBot, "token": TSWRLDBOT_TOKEN},
 }
 
 applications = {}
@@ -115,7 +115,6 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
         )
         await log_action(pool, user_id, f'payment_stripe_{plan}', amount, bot_name)
 
-        # 사용자에게 성공 메시지 보내기
         app_info = next(
             (a for a in applications.values() if a["bot_instance"].bot_name == bot_name),
             None
@@ -125,17 +124,12 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
             link, expiry_str = await create_invite_link(bot)
             await bot.send_message(
                 user_id,
-                f"🎉 Payment successful!\n\n"
-                f"Your invite link (expires {expiry_str}):\n{link}\n\n"
-                f"Welcome!"
+                f"🎉 Payment successful!\n\nYour invite link (expires {expiry_str}):\n{link}\n\nWelcome!"
             )
 
-        # 관리자에게 알림
         plan_type = plan.capitalize()
         payment_date = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
-        expire_date = "Permanent" if is_lifetime else (
-            expiry.strftime('%Y-%m-%d') if expiry else "N/A"
-        )
+        expire_date = "Permanent" if is_lifetime else (expiry.strftime('%Y-%m-%d') if expiry else "N/A")
         admin_text = (
             f"🔔 New Stripe Payment!\n\n"
             f"User ID: {user_id}\n"
