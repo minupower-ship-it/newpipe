@@ -58,11 +58,12 @@ async def startup_event():
         await telegram_app.start()
         applications[key] = {"app": telegram_app, "bot_instance": bot_instance}
 
+    # 등록된 봇 로그 출력 (디버깅용)
+    logger.info(f"Registered applications keys: {list(applications.keys())}")
 
 @app.get("/health")
 async def health():
     return "OK"
-
 
 @app.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
@@ -104,7 +105,6 @@ async def stripe_webhook(request: Request):
 
     return "", 200
 
-
 async def handle_payment_success(user_id, username, session, is_lifetime, expiry, bot_name, plan, amount):
     pool = await get_pool()
     try:
@@ -140,11 +140,17 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
             f"Expire Date: {expire_date}\n"
             f"Amount: ${amount}"
         )
-        await bot.send_message(ADMIN_USER_ID, admin_text)
+
+        # 모든 알림을 letmebot으로 보내기 (다른 봇 결제도 여기서 처리)
+        letme_app = applications.get("letmebot")
+        if letme_app:
+            bot = letme_app["app"].bot
+            await bot.send_message(ADMIN_USER_ID, admin_text)
+        else:
+            logger.error("Cannot send admin notification: LetMeBot not available")
 
     except Exception as e:
         logger.error(f"Payment handling failed for {user_id} ({bot_name}): {e}")
-
 
 @app.post("/webhook/{token}")
 async def telegram_webhook(token: str, request: Request):
@@ -159,7 +165,6 @@ async def telegram_webhook(token: str, request: Request):
     update = Update.de_json(data, telegram_app.bot)
     await telegram_app.process_update(update)
     return "OK"
-
 
 if __name__ == "__main__":
     import uvicorn
