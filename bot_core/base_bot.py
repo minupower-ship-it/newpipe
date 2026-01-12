@@ -188,7 +188,7 @@ class BaseBot:
 
         if query.data.startswith('pay_crypto_'):
             if CRYPTO_ADDRESS and CRYPTO_QR_URL:
-                text = f"💎 Pay via Crypto\n\nAddress: `{CRYPTO_ADDRESS}`"
+                text = f"💎 Pay via Crypto (usd trc20)\n\nAddress: `{CRYPTO_ADDRESS}`"
                 buttons = [
                     [InlineKeyboardButton("QR Code", url=CRYPTO_QR_URL)],
                     [InlineKeyboardButton("Send proof here", url="https://t.me/mbrypie")]
