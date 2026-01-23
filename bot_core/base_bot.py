@@ -1,4 +1,5 @@
-# bot_core/base_bot.py
+# bot_core/base_bot.py (전체 코드 - PayPal 관련만 변경)
+
 import datetime
 import logging
 import stripe
@@ -155,7 +156,12 @@ class BaseBot:
             return
 
         if query.data == 'select_weekly' and self.has_weekly:
-            keyboard = payment_keyboard(lang, 'weekly')
+            # Weekly 플랜 선택 시 PayPal 제외한 키보드 보여주기
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("💳 Stripe", callback_data='pay_stripe_weekly')],
+                [InlineKeyboardButton("₿ Crypto", callback_data='pay_crypto_weekly')],
+                [InlineKeyboardButton("⬅️ Back", callback_data='plans')]
+            ])
             await query.edit_message_text("💳 Select Payment Method for Weekly", parse_mode='Markdown', reply_markup=keyboard)
             return
 
@@ -171,6 +177,11 @@ class BaseBot:
 
         if query.data.startswith('pay_paypal_'):
             plan = query.data.split('_')[2]
+            # Weekly 플랜에서는 PayPal 무시 (이미 버튼이 안 보이게 했지만 안전장치)
+            if plan == 'weekly':
+                await query.edit_message_text("Weekly 플랜은 PayPal을 지원하지 않습니다. Stripe 또는 Crypto를 이용해주세요.")
+                return
+
             paypal_link = self.paypal_weekly if plan == 'weekly' else self.paypal_monthly if plan == 'monthly' else self.paypal_lifetime
             if paypal_link:
                 buttons = [
@@ -188,7 +199,7 @@ class BaseBot:
 
         if query.data.startswith('pay_crypto_'):
             if CRYPTO_ADDRESS and CRYPTO_QR_URL:
-                text = f"💎 Pay via Crypto (usd trc20)\n\nAddress: `{CRYPTO_ADDRESS}`"
+                text = f"💎 Pay via Crypto\n\nAddress: `{CRYPTO_ADDRESS}`"
                 buttons = [
                     [InlineKeyboardButton("QR Code", url=CRYPTO_QR_URL)],
                     [InlineKeyboardButton("Send proof here", url="https://t.me/mbrypie")]
