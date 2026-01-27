@@ -5,22 +5,16 @@ import logging
 import stripe
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    filters,
-    ContextTypes  # ← 여기 추가!
-)
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.error import TimedOut
 from bot_core.db import get_pool, init_db, add_member, log_action
-from bot_core.utils import create_invite_link, send_daily_report, notify_pre_kick, auto_kick_scheduled
+from bot_core.utils import create_invite_link, send_daily_report
 from bots.let_mebot import LetMeBot
 from bots.morevids_bot import MoreVidsBot
 from bots.onlytrns_bot import OnlyTrnsBot
 from bots.tswrldbot import TsWrldBot
 from config import STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID, LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
@@ -53,14 +47,7 @@ async def startup_event():
             send_daily_report,
             time=datetime.time(hour=9, minute=0, tzinfo=datetime.timezone.utc)
         )
-        telegram_app.job_queue.run_daily(
-            notify_pre_kick,
-            time=datetime.time(hour=0, minute=0, tzinfo=datetime.timezone.utc)
-        )
-        telegram_app.job_queue.run_daily(
-            auto_kick_scheduled,
-            time=datetime.time(hour=0, minute=5, tzinfo=datetime.timezone.utc)
-        )
+        # 자동 kick Job 삭제 → Stripe 유저도 자동 kick 안 됨
 
         webhook_url = f"{RENDER_EXTERNAL_URL}/webhook/{cfg['token']}"
         try:
@@ -179,7 +166,7 @@ async def telegram_webhook(token: str, request: Request):
     await telegram_app.process_update(update)
     return "OK"
 
-# /paid 명령어 핸들러
+# /paid 명령어 (weekly=7일, monthly=30일 후 kick 예약)
 async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_USER_ID:
         await update.message.reply_text("관리자만 사용할 수 있습니다.")
