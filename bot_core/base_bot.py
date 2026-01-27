@@ -1,5 +1,4 @@
-# bot_core/base_bot.py (전체 코드 - PayPal 관련만 변경)
-
+# bot_core/base_bot.py
 import datetime
 import logging
 import stripe
@@ -53,13 +52,15 @@ class BaseBot:
             keyboard = [
                 [InlineKeyboardButton("🇬🇧 English", callback_data='lang_en')],
                 [InlineKeyboardButton("🇸🇦 العربية", callback_data='lang_ar')],
-                [InlineKeyboardButton("🇪🇸 Español", callback_data='lang_es')]
+                [InlineKeyboardButton("🇪🇸 Español", callback_data='lang_es')],
+                [InlineKeyboardButton("🇨🇳 中文", callback_data='lang_cn')]
             ]
             await update.message.reply_text(
                 "🌍 Please select your preferred language:\n\n"
                 "🇬🇧 English\n"
                 "🇸🇦 العربية\n"
-                "🇪🇸 Español",
+                "🇪🇸 Español\n"
+                "🇨🇳 中文",
                 reply_markup=InlineKeyboardMarkup(keyboard)
             )
         else:
@@ -93,7 +94,8 @@ class BaseBot:
             keyboard = [
                 [InlineKeyboardButton("🇬🇧 English", callback_data='lang_en')],
                 [InlineKeyboardButton("🇸🇦 العربية", callback_data='lang_ar')],
-                [InlineKeyboardButton("🇪🇸 Español", callback_data='lang_es')]
+                [InlineKeyboardButton("🇪🇸 Español", callback_data='lang_es')],
+                [InlineKeyboardButton("🇨🇳 中文", callback_data='lang_cn')]
             ]
             await query.edit_message_text(
                 "🌍 Change your preferred language:\n\nSelect below 👇",
@@ -156,7 +158,6 @@ class BaseBot:
             return
 
         if query.data == 'select_weekly' and self.has_weekly:
-            # Weekly 플랜 선택 시 PayPal 제외한 키보드 보여주기
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("💳 Stripe", callback_data='pay_stripe_weekly')],
                 [InlineKeyboardButton("₿ Crypto", callback_data='pay_crypto_weekly')],
