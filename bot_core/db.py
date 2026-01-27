@@ -8,24 +8,6 @@ async def get_pool():
 
 async def init_db(pool):
     async with pool.acquire() as conn:
-        # Add bot_name column if not exists
-        await conn.execute('''
-            ALTER TABLE members
-            ADD COLUMN IF NOT EXISTS bot_name TEXT NOT NULL DEFAULT 'unknown';
-        ''')
-
-        # Drop existing primary key if it exists
-        await conn.execute('''
-            ALTER TABLE members
-            DROP CONSTRAINT IF EXISTS members_pkey;
-        ''')
-
-        # Add new primary key
-        await conn.execute('''
-            ALTER TABLE members
-            ADD PRIMARY KEY (user_id, bot_name);
-        ''')
-
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS members (
                 user_id BIGINT,
@@ -38,6 +20,7 @@ async def init_db(pool):
                 active BOOLEAN DEFAULT TRUE,
                 language TEXT DEFAULT 'EN',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                kick_scheduled_at TIMESTAMP,  -- 추가된 컬럼
                 PRIMARY KEY (user_id, bot_name)
             );
         ''')
