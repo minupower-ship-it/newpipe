@@ -20,7 +20,7 @@ async def init_db(pool):
                 active BOOLEAN DEFAULT TRUE,
                 language TEXT DEFAULT 'EN',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                kick_scheduled_at TIMESTAMP,  -- 추가된 컬럼
+                kick_scheduled_at TIMESTAMP,  -- /paid 예약용
                 PRIMARY KEY (user_id, bot_name)
             );
         ''')
