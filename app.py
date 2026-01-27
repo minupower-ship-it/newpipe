@@ -4,11 +4,11 @@ import datetime
 import logging
 import stripe
 from fastapi import FastAPI, Request, HTTPException
-from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from telegram.error import TimedOut
 from bot_core.db import get_pool, init_db, add_member, log_action
-from bot_core.utils import create_invite_link, send_daily_report
+from bot_core.utils import create_invite_link, send_daily_report, notify_pre_kick, auto_kick_scheduled
 from bots.let_mebot import LetMeBot
 from bots.morevids_bot import MoreVidsBot
 from bots.onlytrns_bot import OnlyTrnsBot
@@ -40,9 +40,20 @@ async def startup_event():
         telegram_app.add_handler(CommandHandler("start", bot_instance.start))
         telegram_app.add_handler(CallbackQueryHandler(bot_instance.button_handler))
 
+        # /paid 명령어 (관리자 전용)
+        telegram_app.add_handler(CommandHandler("paid", paid_command, filters=filters.User(user_id=ADMIN_USER_ID)))
+
         telegram_app.job_queue.run_daily(
             send_daily_report,
             time=datetime.time(hour=9, minute=0, tzinfo=datetime.timezone.utc)
+        )
+        telegram_app.job_queue.run_daily(
+            notify_pre_kick,
+            time=datetime.time(hour=0, minute=0, tzinfo=datetime.timezone.utc)
+        )
+        telegram_app.job_queue.run_daily(
+            auto_kick_scheduled,
+            time=datetime.time(hour=0, minute=5, tzinfo=datetime.timezone.utc)
         )
 
         webhook_url = f"{RENDER_EXTERNAL_URL}/webhook/{cfg['token']}"
@@ -58,7 +69,6 @@ async def startup_event():
         await telegram_app.start()
         applications[key] = {"app": telegram_app, "bot_instance": bot_instance}
 
-    # 등록된 봇 로그 출력 (디버깅용)
     logger.info(f"Registered applications keys: {list(applications.keys())}")
 
 @app.get("/health")
@@ -141,13 +151,10 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
             f"Amount: ${amount}"
         )
 
-        # 모든 알림을 letmebot으로 보내기 (다른 봇 결제도 여기서 처리)
         letme_app = applications.get("letmebot")
         if letme_app:
             bot = letme_app["app"].bot
             await bot.send_message(ADMIN_USER_ID, admin_text)
-        else:
-            logger.error("Cannot send admin notification: LetMeBot not available")
 
     except Exception as e:
         logger.error(f"Payment handling failed for {user_id} ({bot_name}): {e}")
@@ -165,6 +172,46 @@ async def telegram_webhook(token: str, request: Request):
     update = Update.de_json(data, telegram_app.bot)
     await telegram_app.process_update(update)
     return "OK"
+
+# /paid 명령어 핸들러
+async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_USER_ID:
+        await update.message.reply_text("관리자만 사용할 수 있습니다.")
+        return
+
+    args = context.args
+    if len(args) != 2:
+        await update.message.reply_text("사용법: /paid [user_id] [plan]\n예: /paid 123456789 weekly")
+        return
+
+    try:
+        user_id = int(args[0])
+        plan = args[1].lower()
+
+        if plan not in ['weekly', 'monthly']:
+            await update.message.reply_text("plan은 weekly 또는 monthly만 가능합니다.")
+            return
+
+        pool = await get_pool()
+
+        days = 7 if plan == 'weekly' else 30
+        kick_at = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+
+        await pool.execute(
+            'UPDATE members SET kick_scheduled_at = $1 WHERE user_id = $2 AND active = TRUE',
+            kick_at, user_id
+        )
+
+        await update.message.reply_text(
+            f"✅ /paid 처리 완료!\n"
+            f"User ID: {user_id}\n"
+            f"Plan: {plan}\n"
+            f"자동 kick 예정: {kick_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"하루 전 알림 자동 전송됩니다."
+        )
+
+    except Exception as e:
+        await update.message.reply_text(f"오류: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
