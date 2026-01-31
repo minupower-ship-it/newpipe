@@ -10,9 +10,9 @@ logger = logging.getLogger(__name__)
 async def create_invite_link(bot):
     link = await bot.create_chat_invite_link(
         chat_id=CHANNEL_ID,
-        member_limit=0,  # 무제한
+        member_limit=0,
     )
-    return link.invite_link, "영구 (구독 유지 중)"
+    return link.invite_link, "Permanent (as long as subscribed)"
 
 async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
     pool = await get_pool()
@@ -50,13 +50,3 @@ async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(ADMIN_USER_ID, message, parse_mode='HTML')
     except Exception as e:
         logger.error(f"Failed to send daily report: {e}")
-
-# 자동 kick Job 삭제 (notify_pre_kick도 삭제)
-# 필요 시 /paid로만 예약된 kick 유지하려면 아래 함수 유지
-async def notify_pre_kick(context: ContextTypes.DEFAULT_TYPE):
-    # /paid로 예약된 사용자만 알림 (필요 시 유지, 아니면 삭제)
-    pass  # 현재는 Stripe 자동 kick 없애서 필요 없음
-
-async def auto_kick_scheduled(context: ContextTypes.DEFAULT_TYPE):
-    # 완전 삭제 (Stripe 자동 kick 없앰)
-    pass
