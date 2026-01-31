@@ -13,6 +13,7 @@ async def init_db(pool):
                 user_id BIGINT,
                 bot_name TEXT NOT NULL,
                 username TEXT,
+                email TEXT,
                 stripe_customer_id TEXT,
                 stripe_subscription_id TEXT,
                 is_lifetime BOOLEAN DEFAULT FALSE,
@@ -20,7 +21,7 @@ async def init_db(pool):
                 active BOOLEAN DEFAULT TRUE,
                 language TEXT DEFAULT 'EN',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                kick_scheduled_at TIMESTAMP,  -- /paid 예약용
+                kick_scheduled_at TIMESTAMP,
                 PRIMARY KEY (user_id, bot_name)
             );
         ''')
@@ -36,27 +37,36 @@ async def init_db(pool):
         ''')
 
         await conn.execute('''
+            ALTER TABLE members
+            ADD COLUMN IF NOT EXISTS email TEXT;
+        ''')
+        await conn.execute('''
+            ALTER TABLE members
+            ADD COLUMN IF NOT EXISTS kick_scheduled_at TIMESTAMP;
+        ''')
+        await conn.execute('''
             ALTER TABLE daily_logs
             ADD COLUMN IF NOT EXISTS bot_name TEXT;
         ''')
 
-async def add_member(pool, user_id, username, customer_id=None, subscription_id=None, is_lifetime=False, expiry=None, bot_name='unknown'):
+async def add_member(pool, user_id, username, customer_id=None, subscription_id=None, is_lifetime=False, expiry=None, bot_name='unknown', email='unknown'):
     if expiry is None:
         expiry = None if is_lifetime else (datetime.datetime.utcnow() + datetime.timedelta(days=30))
     async with pool.acquire() as conn:
         await conn.execute('''
             INSERT INTO members (
-                user_id, bot_name, username, stripe_customer_id, stripe_subscription_id,
+                user_id, bot_name, username, email, stripe_customer_id, stripe_subscription_id,
                 is_lifetime, expiry, active, language
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, 'EN')
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, TRUE, 'EN')
             ON CONFLICT (user_id, bot_name) DO UPDATE SET
                 username = EXCLUDED.username,
+                email = EXCLUDED.email,
                 stripe_customer_id = COALESCE(EXCLUDED.stripe_customer_id, members.stripe_customer_id),
                 stripe_subscription_id = COALESCE(EXCLUDED.stripe_subscription_id, members.stripe_subscription_id),
                 is_lifetime = members.is_lifetime OR EXCLUDED.is_lifetime,
                 expiry = EXCLUDED.expiry,
                 active = TRUE
-        ''', user_id, bot_name, username, customer_id, subscription_id, is_lifetime, expiry)
+        ''', user_id, bot_name, username, email, customer_id, subscription_id, is_lifetime, expiry)
 
 async def log_action(pool, user_id, action, amount=0, bot_name='unknown'):
     async with pool.acquire() as conn:
