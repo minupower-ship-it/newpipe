@@ -1,4 +1,4 @@
-# app.py (전체 교체용 - /paid 명령어 완전 작동 보장)
+# app.py
 import os
 import datetime
 import logging
@@ -39,9 +39,6 @@ async def startup_event():
 
         telegram_app.add_handler(CommandHandler("start", bot_instance.start))
         telegram_app.add_handler(CallbackQueryHandler(bot_instance.button_handler))
-
-        # /paid 명령어 등록 (임시로 제한 해제 - 테스트 후 다시 넣기)
-        telegram_app.add_handler(CommandHandler("paid", paid_command))  # ← filters 제거
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
@@ -110,10 +107,12 @@ async def stripe_webhook(request: Request):
 async def handle_payment_success(user_id, username, session, is_lifetime, expiry, bot_name, plan, amount):
     pool = await get_pool()
     try:
+        email = session.get('customer_details', {}).get('email') or 'unknown'
         await add_member(
             pool, user_id, username,
             session.get('customer'), session.get('subscription'),
-            is_lifetime, expiry, bot_name
+            is_lifetime, expiry, bot_name,
+            email=email
         )
         await log_action(pool, user_id, f'payment_stripe_{plan}', amount, bot_name)
 
@@ -136,6 +135,7 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
             f"🔔 New Stripe Payment!\n\n"
             f"User ID: {user_id}\n"
             f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
+            f"Email: {email}\n"
             f"Bot: {bot_name}\n"
             f"Plan: {plan_type}\n"
             f"Payment Date: {payment_date}\n"
@@ -164,45 +164,6 @@ async def telegram_webhook(token: str, request: Request):
     update = Update.de_json(data, telegram_app.bot)
     await telegram_app.process_update(update)
     return "OK"
-
-# /paid 명령어 (임시로 제한 해제)
-async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"/paid 명령어 입력 감지 - user_id: {update.effective_user.id}, args: {context.args}")
-    args = context.args
-    if len(args) != 2:
-        await update.message.reply_text("사용법: /paid [user_id] [plan]\n예: /paid 123456789 weekly")
-        return
-
-    try:
-        user_id = int(args[0])
-        plan = args[1].lower()
-
-        if plan not in ['weekly', 'monthly']:
-            await update.message.reply_text("plan은 weekly 또는 monthly만 가능합니다.")
-            return
-
-        pool = await get_pool()
-
-        days = 7 if plan == 'weekly' else 30
-        kick_at = datetime.datetime.utcnow() + datetime.timedelta(days=days)
-
-        async with pool.acquire() as conn:
-            await conn.execute(
-                'UPDATE members SET kick_scheduled_at = $1 WHERE user_id = $2 AND active = TRUE',
-                kick_at, user_id
-            )
-
-        await update.message.reply_text(
-            f"✅ /paid 처리 완료!\n"
-            f"User ID: {user_id}\n"
-            f"Plan: {plan}\n"
-            f"자동 kick 예정: {kick_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
-            f"하루 전 알림 자동 전송됩니다."
-        )
-
-    except Exception as e:
-        logger.error(f"/paid 오류: {str(e)}")
-        await update.message.reply_text(f"오류 발생: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
