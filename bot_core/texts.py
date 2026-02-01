@@ -69,6 +69,17 @@ TEXTS = {
             "───────────────────────────\n\n"
             "💡 After payment, please send proof"
         ),
+        "lust4trans_welcome": (
+            "Lust4trans\n\n"
+            "High-quality trans content\n"
+            "Daily updates\n"
+            "Exclusive videos only\n\n"
+            "Choose your plan\n"
+            "Pay securely\n"
+            "Instant access\n\n"
+            "Private & discreet\n"
+            "Support available 24/7"
+        ),
     },
     "AR": {
         "letmebot_welcome": (
@@ -110,6 +121,17 @@ TEXTS = {
             "★ وصول فوري ★\n\n"
             "───────────────────────────\n\n"
             "💡 بعد الدفع, يرجى إرسال الإثبات"
+        ),
+        "lust4trans_welcome": (
+            "Lust4trans\n\n"
+            "محتوى ترانسجندر عالي الجودة\n"
+            "تحديث يومي\n"
+            "فيديوهات حصرية فقط\n\n"
+            "اختر خطتك\n"
+            "ادفع بأمان\n"
+            "وصول فوري\n\n"
+            "خاص وسري\n"
+            "دعم متوفر 24/7"
         ),
     },
     "ES": {
@@ -153,6 +175,17 @@ TEXTS = {
             "───────────────────────────\n\n"
             "💡 Después del pago, envía comprobante"
         ),
+        "lust4trans_welcome": (
+            "Lust4trans\n\n"
+            "Contenido trans de alta calidad\n"
+            "Actualizaciones diarias\n"
+            "Solo videos exclusivos\n\n"
+            "Elige tu plan\n"
+            "Paga de forma segura\n"
+            "Acceso inmediato\n\n"
+            "Privado y discreto\n"
+            "Soporte disponible 24/7"
+        ),
     },
     "CN": {
         "letmebot_welcome": (
@@ -194,6 +227,17 @@ TEXTS = {
             "★ 即时访问 ★\n\n"
             "───────────────────────────\n\n"
             "💡 付款后请发送证明"
+        ),
+        "lust4trans_welcome": (
+            "Lust4trans\n\n"
+            "高质量跨性别内容\n"
+            "每日更新\n"
+            "仅限独家视频\n\n"
+            "选择计划\n"
+            "安全付款\n"
+            "即时访问\n\n"
+            "私密且保密\n"
+            "24/7 支持"
         ),
     }
 }
