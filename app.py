@@ -13,6 +13,7 @@ from bots.let_mebot import LetMeBot
 from bots.morevids_bot import MoreVidsBot
 from bots.onlytrns_bot import OnlyTrnsBot
 from bots.tswrldbot import TsWrldBot
+from bots.lust4trans_bot import Lust4transBot
 from config import STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID, LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
