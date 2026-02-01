@@ -25,6 +25,7 @@ BOT_CLASSES = {
     "morevids": {"cls": MoreVidsBot, "token": MOREVIDS_TOKEN},
     "onlytrns": {"cls": OnlyTrnsBot, "token": ONLYTRNS_TOKEN},
     "tswrld": {"cls": TsWrldBot, "token": TSWRLDBOT_TOKEN},
+    "lust4trans": {"cls": Lust4transBot, "token": LUST4TRANS_TOKEN},  # ← 여기 추가!
 }
 
 applications = {}
