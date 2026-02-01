@@ -14,7 +14,10 @@ from bots.morevids_bot import MoreVidsBot
 from bots.onlytrns_bot import OnlyTrnsBot
 from bots.tswrldbot import TsWrldBot
 from bots.lust4trans_bot import Lust4transBot
-from config import STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID, LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN, LUST4TRANS_TOKEN  # ← LUST4TRANS_TOKEN 추가
+from config import (
+    STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID,
+    LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN, LUST4TRANS_TOKEN
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -26,7 +29,7 @@ BOT_CLASSES = {
     "morevids": {"cls": MoreVidsBot, "token": MOREVIDS_TOKEN},
     "onlytrns": {"cls": OnlyTrnsBot, "token": ONLYTRNS_TOKEN},
     "tswrld": {"cls": TsWrldBot, "token": TSWRLDBOT_TOKEN},
-    "lust4trans": {"cls": Lust4transBot, "token": LUST4TRANS_TOKEN},  # ← 여기 추가!
+    "lust4trans": {"cls": Lust4transBot, "token": LUST4TRANS_TOKEN},
 }
 
 applications = {}
@@ -84,6 +87,7 @@ async def stripe_webhook(request: Request):
         bot_name = session['metadata'].get('bot_name', 'unknown')
         plan = session['metadata'].get('plan', 'unknown')
         username = session['metadata'].get('username', f"user_{user_id}")
+        email = session.get('customer_details', {}).get('email') or 'unknown'
         now = datetime.datetime.utcnow()
         if plan == 'lifetime':
             is_lifetime = True
@@ -98,18 +102,18 @@ async def stripe_webhook(request: Request):
             "morevids": {"weekly": 10, "monthly": 20, "lifetime": 50},
             "onlytrns": {"lifetime": 25},
             "tswrld": {"lifetime": 21},
+            "lust4trans": {"weekly": 11, "monthly": 21, "lifetime": 52},
         }
         amount = amount_map.get(bot_name, {}).get(plan, 0)
         await handle_payment_success(
-            user_id, username, session, is_lifetime, expiry, bot_name, plan, amount
+            user_id, username, session, is_lifetime, expiry, bot_name, plan, amount, email
         )
 
     return "", 200
 
-async def handle_payment_success(user_id, username, session, is_lifetime, expiry, bot_name, plan, amount):
+async def handle_payment_success(user_id, username, session, is_lifetime, expiry, bot_name, plan, amount, email):
     pool = await get_pool()
     try:
-        email = session.get('customer_details', {}).get('email') or 'unknown'
         await add_member(
             pool, user_id, username,
             session.get('customer'), session.get('subscription'),
@@ -166,6 +170,44 @@ async def telegram_webhook(token: str, request: Request):
     update = Update.de_json(data, telegram_app.bot)
     await telegram_app.process_update(update)
     return "OK"
+
+async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"/paid 명령어 입력 감지 - user_id: {update.effective_user.id}, args: {context.args}")
+    args = context.args
+    if len(args) != 2:
+        await update.message.reply_text("사용법: /paid [user_id] [plan]\n예: /paid 123456789 weekly")
+        return
+
+    try:
+        user_id = int(args[0])
+        plan = args[1].lower()
+
+        if plan not in ['weekly', 'monthly']:
+            await update.message.reply_text("plan은 weekly 또는 monthly만 가능합니다.")
+            return
+
+        pool = await get_pool()
+
+        days = 7 if plan == 'weekly' else 30
+        kick_at = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+
+        async with pool.acquire() as conn:
+            await conn.execute(
+                'UPDATE members SET kick_scheduled_at = $1 WHERE user_id = $2 AND active = TRUE',
+                kick_at, user_id
+            )
+
+        await update.message.reply_text(
+            f"✅ /paid 처리 완료!\n"
+            f"User ID: {user_id}\n"
+            f"Plan: {plan}\n"
+            f"자동 kick 예정: {kick_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"하루 전 알림 자동 전송됩니다."
+        )
+
+    except Exception as e:
+        logger.error(f"/paid 오류: {str(e)}")
+        await update.message.reply_text(f"오류 발생: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn
