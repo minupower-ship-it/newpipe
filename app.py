@@ -45,6 +45,10 @@ async def startup_event():
         telegram_app.add_handler(CommandHandler("start", bot_instance.start))
         telegram_app.add_handler(CallbackQueryHandler(bot_instance.button_handler))
 
+        # /paid 명령어 등록 (테스트용으로 filters 제거 - 정상 작동 확인 후 다시 제한 가능)
+        telegram_app.add_handler(CommandHandler("paid", paid_command))
+        # 원래 제한 버전: telegram_app.add_handler(CommandHandler("paid", paid_command, filters=filters.User(user_id=ADMIN_USER_ID)))
+
         telegram_app.job_queue.run_daily(
             send_daily_report,
             time=datetime.time(hour=9, minute=0, tzinfo=datetime.timezone.utc)
