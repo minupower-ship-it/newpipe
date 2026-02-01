@@ -14,7 +14,7 @@ from bots.morevids_bot import MoreVidsBot
 from bots.onlytrns_bot import OnlyTrnsBot
 from bots.tswrldbot import TsWrldBot
 from bots.lust4trans_bot import Lust4transBot
-from config import STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID, LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN
+from config import STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID, LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN, LUST4TRANS_TOKEN  # ← LUST4TRANS_TOKEN 추가
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
