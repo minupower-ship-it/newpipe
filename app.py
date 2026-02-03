@@ -46,13 +46,13 @@ async def startup_event():
         telegram_app.add_handler(CommandHandler("start", bot_instance.start))
         telegram_app.add_handler(CallbackQueryHandler(bot_instance.button_handler))
 
-        # /paid 명령어 - 제한 제거
+        # /paid 명령어 (제한 제거)
         telegram_app.add_handler(CommandHandler("paid", paid_command))
 
-        # /kick 명령어 - 제한 제거
+        # /kick 명령어 (제한 제거)
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
-        # /user 명령어 (홍보자 전용 유지)
+        # /user 명령어 (홍보자 전용)
         telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
 
         telegram_app.job_queue.run_daily(
@@ -249,5 +249,69 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         pool = await get_pool()
 
-        # 해당 user_id의 모든 활성 구독 찾아서 처리
-        rows = await pool.fetch
+        rows = await pool.fetch(
+            'SELECT bot_name FROM members WHERE user_id = $1 AND active = TRUE',
+            user_id
+        )
+
+        if not rows:
+            await update.message.reply_text(f"No active subscription found for User ID {user_id}.")
+            return
+
+        kicked_count = 0
+        for row in rows:
+            bot_name = row['bot_name']
+
+            await pool.execute(
+                'UPDATE members SET active = FALSE WHERE user_id = $1 AND bot_name = $2',
+                user_id, bot_name
+            )
+
+            app_info = next((a for a in applications.values() if a["bot_instance"].bot_name == bot_name), None)
+            if app_info:
+                bot = app_info["app"].bot
+                try:
+                    await bot.ban_chat_member(
+                        chat_id=CHANNEL_ID,
+                        user_id=user_id
+                    )
+                    kicked_count += 1
+                except Exception as e:
+                    logger.error(f"Kick 실패 - User {user_id} ({bot_name}): {e}")
+
+        await update.message.reply_text(
+            f"✅ Kick completed!\n"
+            f"User ID: {user_id}\n"
+            f"Processed bots: {kicked_count}\n"
+            f"User removed from channel."
+        )
+
+    except Exception as e:
+        logger.error(f"/kick error: {str(e)}")
+        await update.message.reply_text(f"Error: {str(e)}")
+
+async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if str(user_id) != LUST4TRANS_PROMOTER_ID:
+        await update.message.reply_text("This command is for Lust4trans promoter only.")
+        return
+
+    pool = await get_pool()
+    today = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    count = await pool.fetchval(
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'lust4trans' AND timestamp >= $1
+        ''',
+        today
+    )
+
+    await update.message.reply_text(
+        f"Today's unique users on Lust4trans bot: **{count or 0}**"
+    )
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
