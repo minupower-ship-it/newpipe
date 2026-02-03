@@ -5,7 +5,7 @@ import logging
 import stripe
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.error import TimedOut
 from bot_core.db import get_pool, init_db, add_member, log_action
 from bot_core.utils import create_invite_link, send_daily_report
