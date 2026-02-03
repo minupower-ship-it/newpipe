@@ -49,10 +49,10 @@ async def startup_event():
         # /paid 명령어 - 제한 제거
         telegram_app.add_handler(CommandHandler("paid", paid_command))
 
-        # /kick 명령어 - 제한 제거
+        # /kick 명령어 - 제한 제거 + 강제 kick
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
-        # /user 명령어 - 홍보자 전용 (영어 응답)
+        # /user 명령어 - 홍보자 전용
         telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
 
         telegram_app.job_queue.run_daily(
@@ -247,45 +247,48 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_id = int(args[0])
 
-        pool = await get_pool()
+        # 강제 kick 먼저 시도 (DB 기록 없어도 kick)
+        kicked = False
+        for key, app_info in applications.items():
+            bot = app_info["app"].bot
+            try:
+                await bot.ban_chat_member(
+                    chat_id=CHANNEL_ID,
+                    user_id=user_id
+                )
+                logger.info(f"강제 kick 성공 - User {user_id} from {key}")
+                kicked = True
+            except Exception as e:
+                logger.error(f"kick 실패 - User {user_id} from {key}: {e}")
 
+        # DB에 기록 있으면 active=FALSE 업데이트
+        pool = await get_pool()
         rows = await pool.fetch(
             'SELECT bot_name FROM members WHERE user_id = $1 AND active = TRUE',
             user_id
         )
 
-        if not rows:
-            await update.message.reply_text(f"No active subscription found for User ID {user_id}.")
-            return
-
-        kicked_count = 0
-        for row in rows:
-            bot_name = row['bot_name']
-
+        if rows:
             async with pool.acquire() as conn:
-                await conn.execute(
-                    'UPDATE members SET active = FALSE WHERE user_id = $1 AND bot_name = $2',
-                    user_id, bot_name
-                )
-
-            app_info = next((a for a in applications.values() if a["bot_instance"].bot_name == bot_name), None)
-            if app_info:
-                bot = app_info["app"].bot
-                try:
-                    await bot.ban_chat_member(
-                        chat_id=CHANNEL_ID,
-                        user_id=user_id
+                for row in rows:
+                    bot_name = row['bot_name']
+                    await conn.execute(
+                        'UPDATE members SET active = FALSE WHERE user_id = $1 AND bot_name = $2',
+                        user_id, bot_name
                     )
-                    kicked_count += 1
-                except Exception as e:
-                    logger.error(f"Kick failed - User {user_id} ({bot_name}): {e}")
+            logger.info(f"DB active=FALSE 업데이트 완료 - User {user_id}")
 
-        await update.message.reply_text(
-            f"✅ Kick completed!\n"
-            f"User ID: {user_id}\n"
-            f"Processed bots: {kicked_count}\n"
-            f"User removed from channel."
-        )
+        if kicked:
+            await update.message.reply_text(
+                f"✅ 강제 Kick 완료!\n"
+                f"User ID: {user_id}\n"
+                f"채널에서 강제로 추방되었습니다 (모든 봇에서 시도)."
+            )
+        else:
+            await update.message.reply_text(
+                f"User ID {user_id} kick 실패.\n"
+                f"채널에서 찾을 수 없거나 권한 문제일 수 있습니다."
+            )
 
     except Exception as e:
         logger.error(f"/kick error: {str(e)}")
