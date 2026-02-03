@@ -5,7 +5,7 @@ import logging
 import stripe
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 from telegram.error import TimedOut
 from bot_core.db import get_pool, init_db, add_member, log_action
 from bot_core.utils import create_invite_link, send_daily_report
@@ -46,13 +46,13 @@ async def startup_event():
         telegram_app.add_handler(CommandHandler("start", bot_instance.start))
         telegram_app.add_handler(CallbackQueryHandler(bot_instance.button_handler))
 
-        # /paid 명령어 (제한 제거)
+        # /paid 명령어 - 제한 제거
         telegram_app.add_handler(CommandHandler("paid", paid_command))
 
-        # /kick 명령어 (제한 제거)
+        # /kick 명령어 - 제한 제거
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
-        # /user 명령어 (홍보자 전용)
+        # /user 명령어 - 홍보자 전용 (영어 응답)
         telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
 
         telegram_app.job_queue.run_daily(
@@ -169,7 +169,7 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
             promoter_id = LUST4TRANS_PROMOTER_ID
             if promoter_id:
                 promoter_text = (
-                    f"🔔 Lust4trans 새 결제!\n\n"
+                    f"🔔 Lust4trans New Payment!\n\n"
                     f"User ID: {user_id}\n"
                     f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
                     f"Plan: {plan_type}\n"
@@ -178,9 +178,9 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
                 )
                 try:
                     await bot.send_message(promoter_id, promoter_text)
-                    logger.info(f"Promoter 알림 전송 성공: {promoter_id}")
+                    logger.info(f"Promoter notification sent: {promoter_id}")
                 except Exception as e:
-                    logger.error(f"Promoter 알림 실패: {e}")
+                    logger.error(f"Promoter notification failed: {e}")
 
     except Exception as e:
         logger.error(f"Payment handling failed for {user_id} ({bot_name}): {e}")
@@ -200,7 +200,7 @@ async def telegram_webhook(token: str, request: Request):
     return "OK"
 
 async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"/paid 명령어 입력 감지 - user_id: {update.effective_user.id}, args: {context.args}")
+    logger.info(f"/paid command detected - user_id: {update.effective_user.id}, args: {context.args}")
     args = context.args
     if len(args) != 2:
         await update.message.reply_text("Usage: /paid [user_id] [plan]\nExample: /paid 123456789 weekly")
@@ -238,7 +238,7 @@ async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {str(e)}")
 
 async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"/kick 명령어 입력 감지 - user_id: {update.effective_user.id}, args: {context.args}")
+    logger.info(f"/kick command detected - user_id: {update.effective_user.id}, args: {context.args}")
     args = context.args
     if len(args) != 1:
         await update.message.reply_text("Usage: /kick [user_id]\nExample: /kick 123456789")
@@ -262,10 +262,11 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for row in rows:
             bot_name = row['bot_name']
 
-            await pool.execute(
-                'UPDATE members SET active = FALSE WHERE user_id = $1 AND bot_name = $2',
-                user_id, bot_name
-            )
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    'UPDATE members SET active = FALSE WHERE user_id = $1 AND bot_name = $2',
+                    user_id, bot_name
+                )
 
             app_info = next((a for a in applications.values() if a["bot_instance"].bot_name == bot_name), None)
             if app_info:
@@ -277,7 +278,7 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                     kicked_count += 1
                 except Exception as e:
-                    logger.error(f"Kick 실패 - User {user_id} ({bot_name}): {e}")
+                    logger.error(f"Kick failed - User {user_id} ({bot_name}): {e}")
 
         await update.message.reply_text(
             f"✅ Kick completed!\n"
