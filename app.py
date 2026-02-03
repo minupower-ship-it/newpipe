@@ -5,7 +5,7 @@ import logging
 import stripe
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler
 from telegram.error import TimedOut
 from bot_core.db import get_pool, init_db, add_member, log_action
 from bot_core.utils import create_invite_link, send_daily_report
@@ -16,7 +16,8 @@ from bots.tswrldbot import TsWrldBot
 from bots.lust4trans_bot import Lust4transBot
 from config import (
     STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID,
-    LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN, LUST4TRANS_TOKEN
+    LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN, LUST4TRANS_TOKEN,
+    LUST4TRANS_PROMOTER_ID
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -45,9 +46,11 @@ async def startup_event():
         telegram_app.add_handler(CommandHandler("start", bot_instance.start))
         telegram_app.add_handler(CallbackQueryHandler(bot_instance.button_handler))
 
-        # /paid 명령어 등록 (테스트용으로 filters 제거 - 정상 작동 확인 후 다시 제한 가능)
-        telegram_app.add_handler(CommandHandler("paid", paid_command))
-        # 원래 제한 버전: telegram_app.add_handler(CommandHandler("paid", paid_command, filters=filters.User(user_id=ADMIN_USER_ID)))
+        # /paid 명령어 (관리자 전용)
+        telegram_app.add_handler(CommandHandler("paid", paid_command, filters=filters.User(user_id=ADMIN_USER_ID)))
+
+        # /user 명령어 (Lust4trans 홍보자 전용)
+        telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
@@ -158,6 +161,24 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
             bot = letme_app["app"].bot
             await bot.send_message(ADMIN_USER_ID, admin_text)
 
+        # lust4trans 결제 시 홍보자에게도 알림 보내기
+        if bot_name == "lust4trans":
+            promoter_id = LUST4TRANS_PROMOTER_ID
+            if promoter_id:
+                promoter_text = (
+                    f"🔔 Lust4trans 새 결제!\n\n"
+                    f"User ID: {user_id}\n"
+                    f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
+                    f"Plan: {plan_type}\n"
+                    f"Amount: ${amount}\n"
+                    f"Date: {payment_date}"
+                )
+                try:
+                    await bot.send_message(promoter_id, promoter_text)
+                    logger.info(f"Promoter 알림 전송 성공: {promoter_id}")
+                except Exception as e:
+                    logger.error(f"Promoter 알림 실패: {e}")
+
     except Exception as e:
         logger.error(f"Payment handling failed for {user_id} ({bot_name}): {e}")
 
@@ -212,6 +233,29 @@ async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"/paid 오류: {str(e)}")
         await update.message.reply_text(f"오류 발생: {str(e)}")
+
+async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    # promoter만 허용
+    if str(user_id) != LUST4TRANS_PROMOTER_ID:
+        await update.message.reply_text("이 명령어는 Lust4trans 홍보자만 사용할 수 있습니다.")
+        return
+
+    pool = await get_pool()
+    today = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    count = await pool.fetchval(
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'lust4trans' AND timestamp >= $1
+        ''',
+        today
+    )
+
+    await update.message.reply_text(
+        f"오늘 Lust4trans 봇 사용한 고유 사용자 수: **{count or 0}명**"
+    )
 
 if __name__ == "__main__":
     import uvicorn
