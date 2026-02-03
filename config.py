@@ -37,6 +37,7 @@ LUST4TRANS_PORTAL_RETURN_URL = os.getenv("LUST4TRANS_PORTAL_RETURN_URL")
 # Channel and Admin
 CHANNEL_ID = os.getenv("CHANNEL_ID")
 ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")
+LUST4TRANS_PROMOTER_ID = os.getenv("LUST4TRANS_PROMOTER_ID")  # 홍보자 Telegram ID
 
 # Crypto and PayPal
 CRYPTO_ADDRESS = os.getenv("CRYPTO_ADDRESS")
