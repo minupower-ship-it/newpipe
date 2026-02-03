@@ -17,7 +17,7 @@ from bots.lust4trans_bot import Lust4transBot
 from config import (
     STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID,
     LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN, LUST4TRANS_TOKEN,
-    LUST4TRANS_PROMOTER_ID, CHANNEL_ID
+    LUST4TRANS_PROMOTER_ID, TSWRLDBOT_PROMOTER_ID, CHANNEL_ID
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -52,8 +52,11 @@ async def startup_event():
         # /kick 명령어 - 제한 제거 + 강제 kick
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
-        # /user 명령어 - 홍보자 전용
+        # /user 명령어 - Lust4trans 홍보자 전용
         telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
+
+        # /user 명령어 - TsWrld 홍보자 전용
+        telegram_app.add_handler(CommandHandler("user", tswrld_user_count_command, filters=filters.User(user_id=int(TSWRLDBOT_PROMOTER_ID))))
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
@@ -178,9 +181,27 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
                 )
                 try:
                     await bot.send_message(promoter_id, promoter_text)
-                    logger.info(f"Promoter notification sent: {promoter_id}")
+                    logger.info(f"Lust4trans Promoter notification sent: {promoter_id}")
                 except Exception as e:
-                    logger.error(f"Promoter notification failed: {e}")
+                    logger.error(f"Lust4trans Promoter notification failed: {e}")
+
+        # tswrld 결제 시 홍보자에게도 알림 보내기
+        if bot_name == "tswrld":
+            promoter_id = TSWRLDBOT_PROMOTER_ID
+            if promoter_id:
+                promoter_text = (
+                    f"🔔 TsWrld New Payment!\n\n"
+                    f"User ID: {user_id}\n"
+                    f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
+                    f"Plan: {plan_type}\n"
+                    f"Amount: ${amount}\n"
+                    f"Date: {payment_date}"
+                )
+                try:
+                    await bot.send_message(promoter_id, promoter_text)
+                    logger.info(f"TsWrld Promoter notification sent: {promoter_id}")
+                except Exception as e:
+                    logger.error(f"TsWrld Promoter notification failed: {e}")
 
     except Exception as e:
         logger.error(f"Payment handling failed for {user_id} ({bot_name}): {e}")
@@ -314,6 +335,28 @@ async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await update.message.reply_text(
         f"Today's unique users on Lust4trans bot: **{count or 0}**"
+    )
+
+async def tswrld_user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if str(user_id) != TSWRLDBOT_PROMOTER_ID:
+        await update.message.reply_text("This command is for TsWrld promoter only.")
+        return
+
+    pool = await get_pool()
+    today = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    count = await pool.fetchval(
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'tswrld' AND timestamp >= $1
+        ''',
+        today
+    )
+
+    await update.message.reply_text(
+        f"Today's unique users on TsWrld bot: **{count or 0}**"
     )
 
 if __name__ == "__main__":
