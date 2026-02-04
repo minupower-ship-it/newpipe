@@ -8,11 +8,16 @@ from bot_core.db import get_near_expiry, get_expired_today, get_daily_stats, get
 logger = logging.getLogger(__name__)
 
 async def create_invite_link(bot):
+    expire_date = datetime.datetime.utcnow() + datetime.timedelta(minutes=5)
+    expire_timestamp = int(expire_date.timestamp())
+
     link = await bot.create_chat_invite_link(
         chat_id=CHANNEL_ID,
-        member_limit=0,
+        expire_date=expire_timestamp,
+        member_limit=1
     )
-    return link.invite_link, "Permanent (as long as subscribed)"
+    expiry_str = expire_date.strftime('%Y-%m-%d %H:%M UTC') + " (5 minutes)"
+    return link.invite_link, expiry_str
 
 async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
     pool = await get_pool()
