@@ -46,17 +46,9 @@ async def startup_event():
         telegram_app.add_handler(CommandHandler("start", bot_instance.start))
         telegram_app.add_handler(CallbackQueryHandler(bot_instance.button_handler))
 
-        # /paid 명령어 - 제한 제거
         telegram_app.add_handler(CommandHandler("paid", paid_command))
-
-        # /kick 명령어 - 제한 제거 + 강제 kick
         telegram_app.add_handler(CommandHandler("kick", kick_command))
-
-        # /user 명령어 - Lust4trans 홍보자 전용
         telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
-
-        # /user 명령어 - TsWrld 홍보자 전용
-        telegram_app.add_handler(CommandHandler("user", tswrld_user_count_command, filters=filters.User(user_id=int(TSWRLDBOT_PROMOTER_ID))))
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
@@ -144,7 +136,7 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
             link, expiry_str = await create_invite_link(bot)
             await bot.send_message(
                 user_id,
-                f"🎉 Payment successful!\n\nYour invite link (expires {expiry_str}):\n{link}\n\nWelcome!"
+                f"🎉 Payment successful!\n\nYour invite link (expires in 5 minutes):\n{link}\n\nLink expires at: {expiry_str}\n\nPlease use it immediately!"
             )
 
         plan_type = plan.capitalize()
@@ -181,9 +173,9 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
                 )
                 try:
                     await bot.send_message(promoter_id, promoter_text)
-                    logger.info(f"Lust4trans Promoter notification sent: {promoter_id}")
+                    logger.info(f"Promoter notification sent: {promoter_id}")
                 except Exception as e:
-                    logger.error(f"Lust4trans Promoter notification failed: {e}")
+                    logger.error(f"Promoter notification failed: {e}")
 
         # tswrld 결제 시 홍보자에게도 알림 보내기
         if bot_name == "tswrld":
@@ -239,10 +231,11 @@ async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         days = 7 if plan == 'weekly' else 30
         kick_at = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+        expiry = kick_at  # Daily Report에 포함되게 expiry도 설정
 
         async with pool.acquire() as conn:
             await conn.execute(
-                'UPDATE members SET kick_scheduled_at = $1 WHERE user_id = $2 AND active = TRUE',
+                'UPDATE members SET kick_scheduled_at = $1, expiry = $1 WHERE user_id = $2 AND active = TRUE',
                 kick_at, user_id
             )
 
@@ -250,8 +243,8 @@ async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"✅ /paid processed!\n"
             f"User ID: {user_id}\n"
             f"Plan: {plan}\n"
-            f"Scheduled kick: {kick_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
-            f"Notification 1 day before will be sent automatically."
+            f"Scheduled kick & expiry: {kick_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
+            f"Daily Report에 만료 알림으로 포함됩니다."
         )
 
     except Exception as e:
@@ -268,7 +261,6 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         user_id = int(args[0])
 
-        # 강제 kick 먼저 시도 (DB 기록 없어도 kick)
         kicked = False
         for key, app_info in applications.items():
             bot = app_info["app"].bot
@@ -282,7 +274,6 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 logger.error(f"kick 실패 - User {user_id} from {key}: {e}")
 
-        # DB에 기록 있으면 active=FALSE 업데이트
         pool = await get_pool()
         rows = await pool.fetch(
             'SELECT bot_name FROM members WHERE user_id = $1 AND active = TRUE',
@@ -303,7 +294,7 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(
                 f"✅ 강제 Kick 완료!\n"
                 f"User ID: {user_id}\n"
-                f"채널에서 강제로 추방되었습니다 (모든 봇에서 시도)."
+                f"채널에서 강제로 추방되었습니다."
             )
         else:
             await update.message.reply_text(
@@ -335,28 +326,6 @@ async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await update.message.reply_text(
         f"Today's unique users on Lust4trans bot: **{count or 0}**"
-    )
-
-async def tswrld_user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if str(user_id) != TSWRLDBOT_PROMOTER_ID:
-        await update.message.reply_text("This command is for TsWrld promoter only.")
-        return
-
-    pool = await get_pool()
-    today = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-
-    count = await pool.fetchval(
-        '''
-        SELECT COUNT(DISTINCT user_id) 
-        FROM daily_logs 
-        WHERE bot_name = 'tswrld' AND timestamp >= $1
-        ''',
-        today
-    )
-
-    await update.message.reply_text(
-        f"Today's unique users on TsWrld bot: **{count or 0}**"
     )
 
 if __name__ == "__main__":
