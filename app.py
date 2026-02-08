@@ -55,7 +55,7 @@ async def startup_event():
         # /user 명령어 - Lust4trans 홍보자 전용
         telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
 
-        # /stats 명령어 - Lust4trans 홍보자 + 관리자 전용 (플랜별 누적 결제 수)
+        # /stats 명령어 - Lust4trans 홍보자 + 관리자 전용
         telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_ids=[ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)])))
 
         telegram_app.job_queue.run_daily(
@@ -94,7 +94,9 @@ async def stripe_webhook(request: Request):
         logger.error(f"Stripe webhook error: {e}")
         raise HTTPException(status_code=400)
 
-    if event['type'] == 'checkout.session.completed':
+    event_type = event['type']
+
+    if event_type == 'checkout.session.completed':
         session = event['data']['object']
         user_id = int(session['metadata']['user_id'])
         bot_name = session['metadata'].get('bot_name', 'unknown')
@@ -122,89 +124,74 @@ async def stripe_webhook(request: Request):
             user_id, username, session, is_lifetime, expiry, bot_name, plan, amount, email
         )
 
-    return "", 200
+    elif event_type == 'invoice.payment_succeeded':
+        # 재결제 성공 알림 추가
+        invoice = event['data']['object']
+        subscription_id = invoice['subscription']
+        customer_id = invoice['customer']
+        amount_paid = invoice['amount_paid'] / 100
+        payment_date = datetime.datetime.fromtimestamp(invoice['created']).strftime('%Y-%m-%d %H:%M UTC')
 
-async def handle_payment_success(user_id, username, session, is_lifetime, expiry, bot_name, plan, amount, email):
-    pool = await get_pool()
-    try:
-        await add_member(
-            pool, user_id, username,
-            session.get('customer'), session.get('subscription'),
-            is_lifetime, expiry, bot_name,
-            email=email
+        pool = await get_pool()
+        row = await pool.fetchrow(
+            'SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1',
+            subscription_id
         )
-        await log_action(pool, user_id, f'payment_stripe_{plan}', amount, bot_name)
 
-        app_info = next(
-            (a for a in applications.values() if a["bot_instance"].bot_name == bot_name),
-            None
-        )
-        if app_info:
-            bot = app_info["app"].bot
-            link, expiry_str = await create_invite_link(bot)
-            await bot.send_message(
-                user_id,
-                f"🎉 Payment successful!\n\nYour invite link (expires in 5 minutes):\n{link}\n\nLink expires at: {expiry_str}\n\nPlease use it immediately!"
+        if row:
+            user_id = row['user_id']
+            bot_name = row['bot_name']
+            username = row['username'] or f"user_{user_id}"
+            email = row['email'] or 'unknown'
+
+            admin_text = (
+                f"🔔 Renewal Stripe Payment!\n\n"
+                f"User ID: {user_id}\n"
+                f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
+                f"Email: {email}\n"
+                f"Bot: {bot_name}\n"
+                f"Subscription ID: {subscription_id}\n"
+                f"Amount: ${amount_paid:.2f}\n"
+                f"Date: {payment_date}\n"
+                f"Automatic renewal success"
             )
 
-        plan_type = plan.capitalize()
-        payment_date = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')
-        expire_date = "Permanent" if is_lifetime else (expiry.strftime('%Y-%m-%d') if expiry else "N/A")
-        admin_text = (
-            f"🔔 New Stripe Payment!\n\n"
-            f"User ID: {user_id}\n"
-            f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
-            f"Email: {email}\n"
-            f"Bot: {bot_name}\n"
-            f"Plan: {plan_type}\n"
-            f"Payment Date: {payment_date}\n"
-            f"Expire Date: {expire_date}\n"
-            f"Amount: ${amount}"
-        )
+            letme_app = applications.get("letmebot")
+            if letme_app:
+                bot = letme_app["app"].bot
+                await bot.send_message(ADMIN_USER_ID, admin_text)
 
-        letme_app = applications.get("letmebot")
-        if letme_app:
-            bot = letme_app["app"].bot
-            await bot.send_message(ADMIN_USER_ID, admin_text)
+            # lust4trans 재결제 시 홍보자 알림
+            if bot_name == "lust4trans":
+                promoter_id = LUST4TRANS_PROMOTER_ID
+                if promoter_id:
+                    promoter_text = (
+                        f"🔔 Lust4trans Renewal Payment!\n\n"
+                        f"User ID: {user_id}\n"
+                        f"Amount: ${amount_paid:.2f}\n"
+                        f"Date: {payment_date}"
+                    )
+                    try:
+                        await bot.send_message(promoter_id, promoter_text)
+                    except Exception as e:
+                        logger.error(f"Promoter renewal notification failed: {e}")
 
-        # lust4trans 결제 시 홍보자에게도 알림 보내기
-        if bot_name == "lust4trans":
-            promoter_id = LUST4TRANS_PROMOTER_ID
-            if promoter_id:
-                promoter_text = (
-                    f"🔔 Lust4trans New Payment!\n\n"
-                    f"User ID: {user_id}\n"
-                    f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
-                    f"Plan: {plan_type}\n"
-                    f"Amount: ${amount}\n"
-                    f"Date: {payment_date}"
-                )
-                try:
-                    await bot.send_message(promoter_id, promoter_text)
-                    logger.info(f"Promoter notification sent: {promoter_id}")
-                except Exception as e:
-                    logger.error(f"Promoter notification failed: {e}")
+            # tswrld 재결제 시 홍보자 알림
+            if bot_name == "tswrld":
+                promoter_id = TSWRLDBOT_PROMOTER_ID
+                if promoter_id:
+                    promoter_text = (
+                        f"🔔 TsWrld Renewal Payment!\n\n"
+                        f"User ID: {user_id}\n"
+                        f"Amount: ${amount_paid:.2f}\n"
+                        f"Date: {payment_date}"
+                    )
+                    try:
+                        await bot.send_message(promoter_id, promoter_text)
+                    except Exception as e:
+                        logger.error(f"TsWrld Promoter renewal notification failed: {e}")
 
-        # tswrld 결제 시 홍보자에게도 알림 보내기
-        if bot_name == "tswrld":
-            promoter_id = TSWRLDBOT_PROMOTER_ID
-            if promoter_id:
-                promoter_text = (
-                    f"🔔 TsWrld New Payment!\n\n"
-                    f"User ID: {user_id}\n"
-                    f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
-                    f"Plan: {plan_type}\n"
-                    f"Amount: ${amount}\n"
-                    f"Date: {payment_date}"
-                )
-                try:
-                    await bot.send_message(promoter_id, promoter_text)
-                    logger.info(f"TsWrld Promoter notification sent: {promoter_id}")
-                except Exception as e:
-                    logger.error(f"TsWrld Promoter notification failed: {e}")
-
-    except Exception as e:
-        logger.error(f"Payment handling failed for {user_id} ({bot_name}): {e}")
+    return "", 200
 
 @app.post("/webhook/{token}")
 async def telegram_webhook(token: str, request: Request):
@@ -316,8 +303,8 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if str(user_id) != LUST4TRANS_PROMOTER_ID:
-        await update.message.reply_text("This command is for Lust4trans promoter only.")
+    if user_id not in [ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)]:
+        await update.message.reply_text("This command is for admin or Lust4trans promoter only.")
         return
 
     pool = await get_pool()
