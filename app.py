@@ -46,9 +46,17 @@ async def startup_event():
         telegram_app.add_handler(CommandHandler("start", bot_instance.start))
         telegram_app.add_handler(CallbackQueryHandler(bot_instance.button_handler))
 
+        # /paid 명령어 - 제한 제거
         telegram_app.add_handler(CommandHandler("paid", paid_command))
+
+        # /kick 명령어 - 제한 제거 + 강제 kick
         telegram_app.add_handler(CommandHandler("kick", kick_command))
+
+        # /user 명령어 - Lust4trans 홍보자 전용
         telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
+
+        # /stats 명령어 - Lust4trans 홍보자 + 관리자 전용 (플랜별 누적 결제 수)
+        telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_ids=[ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)])))
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
@@ -327,6 +335,53 @@ async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await update.message.reply_text(
         f"Today's unique users on Lust4trans bot: **{count or 0}**"
     )
+
+async def lust4trans_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    allowed_ids = [ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)]
+    if user_id not in allowed_ids:
+        await update.message.reply_text("This command is for admin or Lust4trans promoter only.")
+        return
+
+    pool = await get_pool()
+
+    weekly_count = await pool.fetchval(
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'lust4trans' 
+        AND action = 'payment_stripe_weekly'
+        '''
+    )
+    monthly_count = await pool.fetchval(
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'lust4trans' 
+        AND action = 'payment_stripe_monthly'
+        '''
+    )
+    lifetime_count = await pool.fetchval(
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'lust4trans' 
+        AND action = 'payment_stripe_lifetime'
+        '''
+    )
+
+    total_count = weekly_count + monthly_count + lifetime_count
+    total_amount = (weekly_count * 11) + (monthly_count * 21) + (lifetime_count * 52)
+
+    reply_text = (
+        f"Lust4trans Stripe 결제 성공 고객 수 (전체 기간 누적)\n\n"
+        f"Weekly: {weekly_count or 0}명 (${(weekly_count or 0) * 11})\n"
+        f"Monthly: {monthly_count or 0}명 (${(monthly_count or 0) * 21})\n"
+        f"Lifetime: {lifetime_count or 0}명 (${(lifetime_count or 0) * 52})\n\n"
+        f"총: {total_count or 0}명 (${total_amount or 0})"
+    )
+
+    await update.message.reply_text(reply_text)
 
 if __name__ == "__main__":
     import uvicorn
