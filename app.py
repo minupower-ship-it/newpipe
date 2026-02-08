@@ -52,11 +52,11 @@ async def startup_event():
         # /kick 명령어 - 제한 제거 + 강제 kick
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
-        # /user 명령어 - 관리자 + Lust4trans 홍보자 전용
-        telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=ADMIN_USER_ID) | filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
+      # /user 명령어
+telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_ids=[5619516265, int(LUST4TRANS_PROMOTER_ID)])))  # 당신 ID 하드코딩 예시
 
-        # /stats 명령어 - 관리자 + Lust4trans 홍보자 전용
-        telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_id=ADMIN_USER_ID) | filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
+# /stats도 동일하게
+telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_ids=[5619516265, int(LUST4TRANS_PROMOTER_ID)])))
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
