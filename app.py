@@ -52,8 +52,8 @@ async def startup_event():
         # /kick 명령어 - 제한 제거 + 강제 kick
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
-        # /user 명령어 - Lust4trans 홍보자 전용
-        telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
+        # /user 명령어 - Lust4trans 홍보자 + 관리자 전용
+        telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_ids=[ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)])))
 
         # /stats 명령어 - Lust4trans 홍보자 + 관리자 전용
         telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_ids=[ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)])))
@@ -125,7 +125,6 @@ async def stripe_webhook(request: Request):
         )
 
     elif event_type == 'invoice.payment_succeeded':
-        # 재결제 성공 알림 추가
         invoice = event['data']['object']
         subscription_id = invoice['subscription']
         customer_id = invoice['customer']
@@ -161,7 +160,6 @@ async def stripe_webhook(request: Request):
                 bot = letme_app["app"].bot
                 await bot.send_message(ADMIN_USER_ID, admin_text)
 
-            # lust4trans 재결제 시 홍보자 알림
             if bot_name == "lust4trans":
                 promoter_id = LUST4TRANS_PROMOTER_ID
                 if promoter_id:
@@ -176,7 +174,6 @@ async def stripe_webhook(request: Request):
                     except Exception as e:
                         logger.error(f"Promoter renewal notification failed: {e}")
 
-            # tswrld 재결제 시 홍보자 알림
             if bot_name == "tswrld":
                 promoter_id = TSWRLDBOT_PROMOTER_ID
                 if promoter_id:
@@ -303,7 +300,8 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id not in [ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)]:
+    allowed_ids = [ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)]
+    if user_id not in allowed_ids:
         await update.message.reply_text("This command is for admin or Lust4trans promoter only.")
         return
 
