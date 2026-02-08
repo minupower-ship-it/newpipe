@@ -52,11 +52,11 @@ async def startup_event():
         # /kick 명령어 - 제한 제거 + 강제 kick
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
-      # /user 명령어
-telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_ids=[5619516265, int(LUST4TRANS_PROMOTER_ID)])))  # 당신 ID 하드코딩 예시
+        # /user 명령어 - 제한 제거 (누구나 사용 가능)
+        telegram_app.add_handler(CommandHandler("user", user_count_command))
 
-# /stats도 동일하게
-telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_ids=[5619516265, int(LUST4TRANS_PROMOTER_ID)])))
+        # /stats 명령어 - 제한 제거 (누구나 사용 가능)
+        telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command))
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
@@ -223,7 +223,7 @@ async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         days = 7 if plan == 'weekly' else 30
         kick_at = datetime.datetime.utcnow() + datetime.timedelta(days=days)
-        expiry = kick_at
+        expiry = kick_at  # Daily Report에 포함되게 expiry도 설정
 
         async with pool.acquire() as conn:
             await conn.execute(
@@ -299,12 +299,6 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {str(e)}")
 
 async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    allowed_ids = [ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)]
-    if user_id not in allowed_ids:
-        await update.message.reply_text("This command is for admin or Lust4trans promoter only.")
-        return
-
     pool = await get_pool()
     today = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -322,12 +316,6 @@ async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 async def lust4trans_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    allowed_ids = [ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)]
-    if user_id not in allowed_ids:
-        await update.message.reply_text("This command is for admin or Lust4trans promoter only.")
-        return
-
     pool = await get_pool()
 
     weekly_count = await pool.fetchval(
