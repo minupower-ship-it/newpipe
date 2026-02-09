@@ -227,7 +227,7 @@ async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         days = 7 if plan == 'weekly' else 30
         kick_at = datetime.datetime.utcnow() + datetime.timedelta(days=days)
-        expiry = kick_at
+        expiry = kick_at  # Daily Report에 포함되게 expiry도 설정
 
         async with pool.acquire() as conn:
             await conn.execute(
