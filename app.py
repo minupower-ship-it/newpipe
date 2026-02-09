@@ -17,7 +17,7 @@ from bots.lust4trans_bot import Lust4transBot
 from config import (
     STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID,
     LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN, LUST4TRANS_TOKEN,
-    LUST4TRANS_PROMOTER_ID, TSWRLDBOT_PROMOTER_ID, CHANNEL_ID
+    LUST4TRANS_PROMOTER_ID, TSWRLDBOT_PROMOTER_ID, CHANNEL_ID, PLAN_PRICES
 )
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -96,101 +96,104 @@ async def stripe_webhook(request: Request):
 
     event_type = event['type']
 
-    if event_type == 'checkout.session.completed':
-        session = event['data']['object']
-        user_id = int(session['metadata']['user_id'])
-        bot_name = session['metadata'].get('bot_name', 'unknown')
-        plan = session['metadata'].get('plan', 'unknown')
-        username = session['metadata'].get('username', f"user_{user_id}")
-        email = session.get('customer_details', {}).get('email') or 'unknown'
-        now = datetime.datetime.utcnow()
-        if plan == 'lifetime':
-            is_lifetime = True
-            expiry = None
-        else:
-            is_lifetime = False
-            expiry = now + datetime.timedelta(
-                days=30 if plan == 'monthly' else 7 if plan == 'weekly' else 0
-            )
-        amount_map = {
-            "letmebot": {"weekly": 10, "monthly": 20, "lifetime": 50},
-            "morevids": {"weekly": 10, "monthly": 20, "lifetime": 50},
-            "onlytrns": {"lifetime": 25},
-            "tswrld": {"lifetime": 21},
-            "lust4trans": {"weekly": 11, "monthly": 21, "lifetime": 52},
-        }
-        amount = amount_map.get(bot_name, {}).get(plan, 0)
-        await handle_payment_success(
-            user_id, username, session, is_lifetime, expiry, bot_name, plan, amount, email
-        )
-
-    elif event_type == 'invoice.payment_succeeded':
-        invoice = event['data']['object']
-        subscription_id = invoice.get('subscription')
-        if not subscription_id:
-            logger.warning("invoice.payment_succeeded 이벤트에 subscription 키 없음. 무시.")
-            return
-
-        customer_id = invoice['customer']
-        amount_paid = invoice['amount_paid'] / 100
-        payment_date = datetime.datetime.fromtimestamp(invoice['created']).strftime('%Y-%m-%d %H:%M UTC')
-
-        pool = await get_pool()
-        row = await pool.fetchrow(
-            'SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1',
-            subscription_id
-        )
-
-        if row:
-            user_id = row['user_id']
-            bot_name = row['bot_name']
-            username = row['username'] or f"user_{user_id}"
-            email = row['email'] or 'unknown'
-
-            admin_text = (
-                f"🔔 Renewal Stripe Payment!\n\n"
-                f"User ID: {user_id}\n"
-                f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
-                f"Email: {email}\n"
-                f"Bot: {bot_name}\n"
-                f"Subscription ID: {subscription_id}\n"
-                f"Amount: ${amount_paid:.2f}\n"
-                f"Date: {payment_date}\n"
-                f"Automatic renewal success"
+    try:
+        if event_type == 'checkout.session.completed':
+            session = event['data']['object']
+            user_id = int(session['metadata']['user_id'])
+            bot_name = session['metadata'].get('bot_name', 'unknown')
+            plan = session['metadata'].get('plan', 'unknown')
+            username = session['metadata'].get('username', f"user_{user_id}")
+            email = session.get('customer_details', {}).get('email') or 'unknown'
+            now = datetime.datetime.utcnow()
+            if plan == 'lifetime':
+                is_lifetime = True
+                expiry = None
+            else:
+                is_lifetime = False
+                expiry = now + datetime.timedelta(
+                    days=30 if plan == 'monthly' else 7 if plan == 'weekly' else 0
+                )
+            # amount를 PLAN_PRICES에서 가져오도록 변경 (하드코딩 대신)
+            amount_str = PLAN_PRICES.get(bot_name, {}).get(plan, '$0')
+            amount = float(amount_str.strip('$'))
+            await handle_payment_success(
+                user_id, username, session, is_lifetime, expiry, bot_name, plan, amount, email
             )
 
-            letme_app = applications.get("letmebot")
-            if letme_app:
-                bot = letme_app["app"].bot
-                await bot.send_message(ADMIN_USER_ID, admin_text)
+        elif event_type == 'invoice.payment_succeeded':
+            invoice = event['data']['object']
+            subscription_id = invoice.get('subscription')
+            if not subscription_id:
+                logger.warning("invoice.payment_succeeded 이벤트에 subscription 키 없음. 무시.")
+                return "", 200  # 무시하고 200 반환
 
-            if bot_name == "lust4trans":
-                promoter_id = LUST4TRANS_PROMOTER_ID
-                if promoter_id:
-                    promoter_text = (
-                        f"🔔 Lust4trans Renewal Payment!\n\n"
-                        f"User ID: {user_id}\n"
-                        f"Amount: ${amount_paid:.2f}\n"
-                        f"Date: {payment_date}"
-                    )
-                    try:
-                        await bot.send_message(promoter_id, promoter_text)
-                    except Exception as e:
-                        logger.error(f"Promoter renewal notification failed: {e}")
+            customer_id = invoice['customer']
+            amount_paid = invoice['amount_paid'] / 100
+            payment_date = datetime.datetime.fromtimestamp(invoice['created']).strftime('%Y-%m-%d %H:%M UTC')
 
-            if bot_name == "tswrld":
-                promoter_id = TSWRLDBOT_PROMOTER_ID
-                if promoter_id:
-                    promoter_text = (
-                        f"🔔 TsWrld Renewal Payment!\n\n"
-                        f"User ID: {user_id}\n"
-                        f"Amount: ${amount_paid:.2f}\n"
-                        f"Date: {payment_date}"
-                    )
-                    try:
-                        await bot.send_message(promoter_id, promoter_text)
-                    except Exception as e:
-                        logger.error(f"TsWrld Promoter renewal notification failed: {e}")
+            pool = await get_pool()
+            row = await pool.fetchrow(
+                'SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1',
+                subscription_id
+            )
+
+            if row:
+                user_id = row['user_id']
+                bot_name = row['bot_name']
+                username = row['username'] or f"user_{user_id}"
+                email = row['email'] or 'unknown'
+
+                admin_text = (
+                    f"🔔 Renewal Stripe Payment!\n\n"
+                    f"User ID: {user_id}\n"
+                    f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
+                    f"Email: {email}\n"
+                    f"Bot: {bot_name}\n"
+                    f"Subscription ID: {subscription_id}\n"
+                    f"Amount: ${amount_paid:.2f}\n"
+                    f"Date: {payment_date}\n"
+                    f"Automatic renewal success"
+                )
+
+                # letmebot 대신 해당 bot_name의 bot 사용 (더 안전)
+                key = bot_name.replace('bot', '') if 'bot' in bot_name else bot_name
+                if key in applications:
+                    bot = applications[key]["app"].bot
+                    await bot.send_message(ADMIN_USER_ID, admin_text)
+                else:
+                    logger.warning(f"Bot {bot_name} not found for renewal notification")
+
+                if bot_name == "lust4trans":
+                    promoter_id = LUST4TRANS_PROMOTER_ID
+                    if promoter_id:
+                        promoter_text = (
+                            f"🔔 Lust4trans Renewal Payment!\n\n"
+                            f"User ID: {user_id}\n"
+                            f"Amount: ${amount_paid:.2f}\n"
+                            f"Date: {payment_date}"
+                        )
+                        try:
+                            await bot.send_message(promoter_id, promoter_text)
+                        except Exception as e:
+                            logger.error(f"Promoter renewal notification failed: {e}")
+
+                if bot_name == "tswrld":
+                    promoter_id = TSWRLDBOT_PROMOTER_ID
+                    if promoter_id:
+                        promoter_text = (
+                            f"🔔 TsWrld Renewal Payment!\n\n"
+                            f"User ID: {user_id}\n"
+                            f"Amount: ${amount_paid:.2f}\n"
+                            f"Date: {payment_date}"
+                        )
+                        try:
+                            await bot.send_message(promoter_id, promoter_text)
+                        except Exception as e:
+                            logger.error(f"TsWrld Promoter renewal notification failed: {e}")
+
+    except Exception as e:
+        logger.error(f"Stripe event handling error: {str(e)}")
+        raise HTTPException(status_code=500)
 
     return "", 200
 
@@ -207,6 +210,72 @@ async def telegram_webhook(token: str, request: Request):
     update = Update.de_json(data, telegram_app.bot)
     await telegram_app.process_update(update)
     return "OK"
+
+# handle_payment_success 함수 정의 (추가: DB 업데이트, 로그, 초대 링크, 알림)
+async def handle_payment_success(user_id, username, session, is_lifetime, expiry, bot_name, plan, amount, email):
+    try:
+        pool = await get_pool()
+        customer_id = session.get('customer')
+        subscription_id = session.get('subscription')
+
+        await add_member(pool, user_id, username, customer_id, subscription_id, is_lifetime, expiry, bot_name, email)
+        await log_action(pool, user_id, f'payment_stripe_{plan}', amount, bot_name)
+
+        # bot_instance 가져오기
+        key = bot_name.replace('bot', '') if 'bot' in bot_name else bot_name
+        if key not in applications:
+            logger.error(f"Bot key {key} not found for {bot_name}")
+            return
+        bot = applications[key]["app"].bot
+
+        # 초대 링크 생성 및 사용자에게 보내기
+        invite_link, expiry_str = await create_invite_link(bot)
+        user_text = (
+            f"✅ Payment successful!\n\n"
+            f"Plan: {plan.capitalize()}\n"
+            f"Amount: ${amount}\n"
+            f"Join the channel: {invite_link}\n"
+            f"Expires: {expiry_str}"
+        )
+        await bot.send_message(user_id, user_text)
+
+        # 관리자 알림
+        admin_text = (
+            f"🔔 New Stripe Payment!\n\n"
+            f"User ID: {user_id}\n"
+            f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
+            f"Email: {email}\n"
+            f"Bot: {bot_name}\n"
+            f"Plan: {plan.capitalize()}\n"
+            f"Amount: ${amount}\n"
+            f"Customer ID: {customer_id}\n"
+            f"Subscription ID: {subscription_id or 'N/A'}\n"
+            f"Expiry: {expiry.strftime('%Y-%m-%d %H:%M UTC') if expiry else 'Lifetime'}"
+        )
+        await bot.send_message(ADMIN_USER_ID, admin_text)
+
+        # 프로모터 알림 (bot_name에 따라)
+        if bot_name == "lust4trans" and LUST4TRANS_PROMOTER_ID:
+            promoter_text = (
+                f"🔔 Lust4trans New Payment!\n\n"
+                f"User ID: {user_id}\n"
+                f"Plan: {plan.capitalize()}\n"
+                f"Amount: ${amount}"
+            )
+            await bot.send_message(LUST4TRANS_PROMOTER_ID, promoter_text)
+        elif bot_name == "tswrld" and TSWRLDBOT_PROMOTER_ID:
+            promoter_text = (
+                f"🔔 TsWrld New Payment!\n\n"
+                f"User ID: {user_id}\n"
+                f"Plan: {plan.capitalize()}\n"
+                f"Amount: ${amount}"
+            )
+            await bot.send_message(TSWRLDBOT_PROMOTER_ID, promoter_text)
+
+        logger.info(f"Payment success handled for user {user_id} on {bot_name}")
+
+    except Exception as e:
+        logger.error(f"handle_payment_success error: {str(e)}")
 
 async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"/paid command detected - user_id: {update.effective_user.id}, args: {context.args}")
