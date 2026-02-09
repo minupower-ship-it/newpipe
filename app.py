@@ -52,11 +52,11 @@ async def startup_event():
         # /kick 명령어 - 제한 제거 + 강제 kick
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
-        # /user 명령어 - 제한 제거 (누구나 사용 가능)
-        telegram_app.add_handler(CommandHandler("user", user_count_command))
+        # /user 명령어 - Lust4trans 홍보자 + 관리자 전용
+        telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_ids=[ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)])))
 
-        # /stats 명령어 - 제한 제거 (누구나 사용 가능)
-        telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command))
+        # /stats 명령어 - Lust4trans 홍보자 + 관리자 전용
+        telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_ids=[ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)])))
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
@@ -126,7 +126,11 @@ async def stripe_webhook(request: Request):
 
     elif event_type == 'invoice.payment_succeeded':
         invoice = event['data']['object']
-        subscription_id = invoice['subscription']
+        subscription_id = invoice.get('subscription')  # get()으로 안전하게
+        if not subscription_id:
+            logger.warning("invoice.payment_succeeded 이벤트에 subscription 키 없음. 무시.")
+            return
+
         customer_id = invoice['customer']
         amount_paid = invoice['amount_paid'] / 100
         payment_date = datetime.datetime.fromtimestamp(invoice['created']).strftime('%Y-%m-%d %H:%M UTC')
@@ -299,6 +303,12 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: {str(e)}")
 
 async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    allowed_ids = [ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)]
+    if user_id not in allowed_ids:
+        await update.message.reply_text("This command is for admin or Lust4trans promoter only.")
+        return
+
     pool = await get_pool()
     today = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -316,6 +326,12 @@ async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     )
 
 async def lust4trans_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    allowed_ids = [ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)]
+    if user_id not in allowed_ids:
+        await update.message.reply_text("This command is for admin or Lust4trans promoter only.")
+        return
+
     pool = await get_pool()
 
     weekly_count = await pool.fetchval(
