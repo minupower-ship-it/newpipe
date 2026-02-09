@@ -35,10 +35,10 @@ TSWRLDBOT_PORTAL_RETURN_URL = os.getenv("TSWRLDBOT_PORTAL_RETURN_URL")
 LUST4TRANS_PORTAL_RETURN_URL = os.getenv("LUST4TRANS_PORTAL_RETURN_URL")
 
 # Channel and Admin
-CHANNEL_ID = os.getenv("CHANNEL_ID")
-ADMIN_USER_ID = os.getenv("ADMIN_USER_ID")
-LUST4TRANS_PROMOTER_ID = os.getenv("LUST4TRANS_PROMOTER_ID")
-TSWRLDBOT_PROMOTER_ID = os.getenv("TSWRLDBOT_PROMOTER_ID")
+CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))  # int 변환 추가
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))  # int 변환 추가
+LUST4TRANS_PROMOTER_ID = int(os.getenv("LUST4TRANS_PROMOTER_ID", "0"))  # int 변환 추가 (일관성 위해)
+TSWRLDBOT_PROMOTER_ID = int(os.getenv("TSWRLDBOT_PROMOTER_ID", "0"))  # int 변환 추가 (일관성 위해)
 
 # Crypto and PayPal
 CRYPTO_ADDRESS = os.getenv("CRYPTO_ADDRESS")
