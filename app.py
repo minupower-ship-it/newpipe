@@ -52,11 +52,11 @@ async def startup_event():
         # /kick 명령어 - 제한 제거 + 강제 kick
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
-        # /user 명령어 - Lust4trans 홍보자 + 관리자 전용
-        telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=ADMIN_USER_ID) | filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
+        # /user 명령어 - 관리자(하드코딩) + Lust4trans 홍보자 전용
+        telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_ids=[5619516265, int(LUST4TRANS_PROMOTER_ID)])))
 
-        # /stats 명령어 - Lust4trans 홍보자 + 관리자 전용
-        telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_id=ADMIN_USER_ID) | filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
+        # /stats 명령어 - 관리자(하드코딩) + Lust4trans 홍보자 전용
+        telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_ids=[5619516265, int(LUST4TRANS_PROMOTER_ID)])))
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
@@ -126,7 +126,7 @@ async def stripe_webhook(request: Request):
 
     elif event_type == 'invoice.payment_succeeded':
         invoice = event['data']['object']
-        subscription_id = invoice.get('subscription')  # get()으로 안전하게
+        subscription_id = invoice.get('subscription')
         if not subscription_id:
             logger.warning("invoice.payment_succeeded 이벤트에 subscription 키 없음. 무시.")
             return
@@ -227,7 +227,7 @@ async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         days = 7 if plan == 'weekly' else 30
         kick_at = datetime.datetime.utcnow() + datetime.timedelta(days=days)
-        expiry = kick_at  # Daily Report에 포함되게 expiry도 설정
+        expiry = kick_at
 
         async with pool.acquire() as conn:
             await conn.execute(
