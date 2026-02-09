@@ -53,10 +53,10 @@ async def startup_event():
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
         # /user 명령어 - 관리자(하드코딩) + Lust4trans 홍보자 전용
-        telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_ids=[5619516265, int(LUST4TRANS_PROMOTER_ID)])))
+        telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=5619516265) | filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
 
         # /stats 명령어 - 관리자(하드코딩) + Lust4trans 홍보자 전용
-        telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_ids=[5619516265, int(LUST4TRANS_PROMOTER_ID)])))
+        telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_id=5619516265) | filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
