@@ -113,7 +113,6 @@ async def stripe_webhook(request: Request):
                 expiry = now + datetime.timedelta(
                     days=30 if plan == 'monthly' else 7 if plan == 'weekly' else 0
                 )
-            # amount를 PLAN_PRICES에서 가져오도록 변경 (하드코딩 대신)
             amount_str = PLAN_PRICES.get(bot_name, {}).get(plan, '$0')
             amount = float(amount_str.strip('$'))
             await handle_payment_success(
@@ -128,7 +127,6 @@ async def stripe_webhook(request: Request):
             payment_date = datetime.datetime.fromtimestamp(invoice['created']).strftime('%Y-%m-%d %H:%M UTC')
 
             pool = await get_pool()
-            # subscription_id 없어도 customer_id로 조회
             query = '''
                 SELECT user_id, bot_name, username, email, is_lifetime FROM members 
                 WHERE stripe_customer_id = $1 OR stripe_subscription_id = $2
@@ -145,10 +143,9 @@ async def stripe_webhook(request: Request):
             email = row['email'] or 'unknown'
             is_lifetime = row['is_lifetime']
 
-            # plan 추정 (is_lifetime나 DB에서)
-            plan = 'lifetime' if is_lifetime else 'monthly' if subscription_id else 'weekly'  # weekly도 subscription일 수 있음
+            # plan 추정
+            plan = 'lifetime' if is_lifetime else 'monthly' if 'monthly' in invoice.get('lines', {}).get('data', [{}])[0].get('description', '') else 'weekly'
 
-            # 중복 체크 (최근 5분 내 로그 있으면 스킵)
             now = datetime.datetime.utcnow()
             log_check = await pool.fetchval(
                 'SELECT COUNT(*) FROM daily_logs WHERE user_id = $1 AND action LIKE $2 AND timestamp > $3',
@@ -158,7 +155,6 @@ async def stripe_webhook(request: Request):
                 logger.info(f"Duplicate invoice event for user {user_id}, skipping notification.")
                 return "", 200
 
-            # 알림 텍스트
             title = "🔔 Renewal Stripe Payment!" if subscription_id else "🔔 New Stripe Payment (No Subscription)!"
             admin_text = (
                 f"{title}\n\n"
@@ -173,15 +169,13 @@ async def stripe_webhook(request: Request):
                 f"Customer ID: {customer_id}"
             )
 
-            # 해당 bot의 bot으로 알림 보내기
-            key = bot_name.replace('bot', '') if 'bot' in bot_name else bot_name
+            key = bot_name if bot_name == 'letmebot' else bot_name.replace('bot', '')
             if key in applications:
                 bot = applications[key]["app"].bot
                 await bot.send_message(ADMIN_USER_ID, admin_text)
             else:
                 logger.warning(f"Bot {bot_name} not found for payment notification")
 
-            # 프로모터 알림
             promoter_id = None
             if bot_name == "lust4trans":
                 promoter_id = LUST4TRANS_PROMOTER_ID
@@ -199,7 +193,6 @@ async def stripe_webhook(request: Request):
                 except Exception as e:
                     logger.error(f"Promoter notification failed for {bot_name}: {e}")
 
-            # 로그 추가 (필요 시)
             await log_action(pool, user_id, f'payment_stripe_{plan}', amount_paid, bot_name)
             logger.info(f"Invoice payment handled for user {user_id} on {bot_name}")
 
@@ -223,14 +216,12 @@ async def telegram_webhook(token: str, request: Request):
     await telegram_app.process_update(update)
     return "OK"
 
-# handle_payment_success 함수 정의 (기존 유지)
 async def handle_payment_success(user_id, username, session, is_lifetime, expiry, bot_name, plan, amount, email):
     try:
         pool = await get_pool()
         customer_id = session.get('customer')
         subscription_id = session.get('subscription')
 
-        # 중복 체크 (최근 5분 내 로그 있으면 스킵)
         now = datetime.datetime.utcnow()
         log_check = await pool.fetchval(
             'SELECT COUNT(*) FROM daily_logs WHERE user_id = $1 AND action = $2 AND timestamp > $3',
@@ -243,14 +234,16 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
         await add_member(pool, user_id, username, customer_id, subscription_id, is_lifetime, expiry, bot_name, email)
         await log_action(pool, user_id, f'payment_stripe_{plan}', amount, bot_name)
 
-        # bot_instance 가져오기
-        key = bot_name.replace('bot', '') if 'bot' in bot_name else bot_name
+        # bot_instance 가져오기 (letmebot special case 개선)
+        key = bot_name  # 그대로 사용 (replace 제거, BOT_CLASSES 키와 동일)
         if key not in applications:
             logger.error(f"Bot key {key} not found for {bot_name}")
             return
         bot = applications[key]["app"].bot
 
-        # 초대 링크 생성 및 사용자에게 보내기
+        # 초대 링크 전송 로그 추가
+        logger.info(f"Sending invite link to user {user_id} for {bot_name}")
+
         invite_link, expiry_str = await create_invite_link(bot)
         user_text = (
             f"✅ Payment successful!\n\n"
@@ -261,7 +254,6 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
         )
         await bot.send_message(user_id, user_text)
 
-        # 관리자 알림
         admin_text = (
             f"🔔 New Stripe Payment!\n\n"
             f"User ID: {user_id}\n"
@@ -276,7 +268,6 @@ async def handle_payment_success(user_id, username, session, is_lifetime, expiry
         )
         await bot.send_message(ADMIN_USER_ID, admin_text)
 
-        # 프로모터 알림 (bot_name에 따라)
         if bot_name == "lust4trans" and LUST4TRANS_PROMOTER_ID:
             promoter_text = (
                 f"🔔 Lust4trans New Payment!\n\n"
