@@ -7,7 +7,7 @@ from fastapi import FastAPI, Request, HTTPException
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from telegram.error import TimedOut
-from bot_core.db import get_pool, init_db, add_member, log_action
+from bot_core.db import get_pool, init_db, add_member, log_action, get_member_status
 from bot_core.utils import create_invite_link, send_daily_report
 from bots.let_mebot import LetMeBot
 from bots.morevids_bot import MoreVidsBot
@@ -97,265 +97,186 @@ async def stripe_webhook(request: Request):
     event_type = event['type']
 
     try:
-        if event_type == 'checkout.session.completed':
+        if event_type == "checkout.session.completed":
             session = event['data']['object']
-            user_id = int(session['metadata']['user_id'])
+            user_id = int(session['metadata'].get('user_id', 0))
             bot_name = session['metadata'].get('bot_name', 'unknown')
-            plan = session['metadata'].get('plan', 'unknown')
-            username = session['metadata'].get('username', f"user_{user_id}")
-            email = session.get('customer_details', {}).get('email') or 'unknown'
-            now = datetime.datetime.utcnow()
-            if plan == 'lifetime':
-                is_lifetime = True
-                expiry = None
-            else:
-                is_lifetime = False
-                expiry = now + datetime.timedelta(
-                    days=30 if plan == 'monthly' else 7 if plan == 'weekly' else 0
-                )
-            amount_str = PLAN_PRICES.get(bot_name, {}).get(plan, '$0')
-            amount = float(amount_str.strip('$'))
-            await handle_payment_success(
-                user_id, username, session, is_lifetime, expiry, bot_name, plan, amount, email
-            )
+            plan = session['metadata'].get('plan', 'monthly')
+            subscription_id = session.get('subscription')
+            customer_id = session['customer']
 
-        elif event_type == 'invoice.payment_succeeded':
+            if user_id and bot_name != 'unknown':
+                username = session['metadata'].get('username', f"user_{user_id}")
+                email = session.get('customer_details', {}).get('email', 'unknown')
+
+                expiry = None
+                is_lifetime = plan == 'lifetime'
+                if not is_lifetime:
+                    days = 7 if plan == 'weekly' else 30
+                    expiry = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+
+                pool = await get_pool()
+                await add_member(
+                    pool, user_id, username, customer_id, subscription_id,
+                    is_lifetime=is_lifetime, expiry=expiry, bot_name=bot_name, email=email
+                )
+                await log_action(pool, user_id, f'payment_stripe_{plan}', session['amount_total'] / 100, bot_name)
+
+                # 첫 결제 성공 시 invite link 생성 및 알림 (기존 동작 유지)
+                if bot_name in applications:
+                    bot = applications[bot_name]["app"].bot
+                    link, expiry_str = await create_invite_link(bot)
+                    await bot.send_message(
+                        user_id,
+                        f"✅ Payment successful!\n\nYour invite link (expires in 5 min):\n{link}\n\n{expiry_str}"
+                    )
+
+                # 첫 결제 알림 → admin & promoter
+                amount = session['amount_total'] / 100
+                msg = (
+                    f"💳 **New Subscription (First Payment)**\n\n"
+                    f"• Bot: {bot_name.upper()}\n"
+                    f"• User: @{username} (ID: {user_id})\n"
+                    f"• Plan: {plan.capitalize()}\n"
+                    f"• Amount: ${amount:.2f}\n"
+                    f"• Time: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+                )
+
+                # Admin
+                try:
+                    await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')  # 아무 bot 써도 됨
+                except:
+                    pass
+
+                # Promoter
+                promoter_id = None
+                if bot_name == "lust4trans":
+                    promoter_id = int(LUST4TRANS_PROMOTER_ID or 0)
+                elif bot_name == "tswrld":
+                    promoter_id = int(TSWRLDBOT_PROMOTER_ID or 0)
+
+                if promoter_id and promoter_id != ADMIN_USER_ID:
+                    try:
+                        await applications[bot_name]["app"].bot.send_message(promoter_id, msg, parse_mode='Markdown')
+                    except Exception as e:
+                        logger.error(f"Promoter notify fail {promoter_id}: {e}")
+
+        elif event_type == "invoice.payment_succeeded":
             invoice = event['data']['object']
             subscription_id = invoice.get('subscription')
-            customer_id = invoice['customer']
-            amount_paid = invoice['amount_paid'] / 100
-            payment_date = datetime.datetime.fromtimestamp(invoice['created']).strftime('%Y-%m-%d %H:%M UTC')
 
-            pool = await get_pool()
-            query = '''
-                SELECT user_id, bot_name, username, email, is_lifetime FROM members 
-                WHERE stripe_customer_id = $1 OR stripe_subscription_id = $2
-            '''
-            row = await pool.fetchrow(query, customer_id, subscription_id or None)
-
-            if not row:
-                logger.warning(f"No member found for customer_id {customer_id} or subscription_id {subscription_id}. Ignoring.")
-                return "", 200
-
-            user_id = row['user_id']
-            bot_name = row['bot_name']
-            username = row['username'] or f"user_{user_id}"
-            email = row['email'] or 'unknown'
-            is_lifetime = row['is_lifetime']
-
-            # plan 추정
-            plan = 'lifetime' if is_lifetime else 'monthly' if 'monthly' in invoice.get('lines', {}).get('data', [{}])[0].get('description', '') else 'weekly'
-
-            now = datetime.datetime.utcnow()
-            log_check = await pool.fetchval(
-                'SELECT COUNT(*) FROM daily_logs WHERE user_id = $1 AND action LIKE $2 AND timestamp > $3',
-                user_id, 'payment_stripe_%', now - datetime.timedelta(minutes=5)
-            )
-            if log_check > 0:
-                logger.info(f"Duplicate invoice event for user {user_id}, skipping notification.")
-                return "", 200
-
-            title = "🔔 Renewal Stripe Payment!" if subscription_id else "🔔 New Stripe Payment (No Subscription)!"
-            admin_text = (
-                f"{title}\n\n"
-                f"User ID: {user_id}\n"
-                f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
-                f"Email: {email}\n"
-                f"Bot: {bot_name}\n"
-                f"Plan: {plan.capitalize()}\n"
-                f"Amount: ${amount_paid:.2f}\n"
-                f"Date: {payment_date}\n"
-                f"Subscription ID: {subscription_id or 'N/A'}\n"
-                f"Customer ID: {customer_id}"
-            )
-
-            key = bot_name if bot_name == 'letmebot' else bot_name.replace('bot', '')
-            if key in applications:
-                bot = applications[key]["app"].bot
-                await bot.send_message(ADMIN_USER_ID, admin_text)
-            else:
-                logger.warning(f"Bot {bot_name} not found for payment notification")
-
-            promoter_id = None
-            if bot_name == "lust4trans":
-                promoter_id = LUST4TRANS_PROMOTER_ID
-            elif bot_name == "tswrld":
-                promoter_id = TSWRLDBOT_PROMOTER_ID
-            if promoter_id:
-                promoter_text = (
-                    f"🔔 {bot_name.capitalize()} { 'Renewal' if subscription_id else 'New' } Payment!\n\n"
-                    f"User ID: {user_id}\n"
-                    f"Amount: ${amount_paid:.2f}\n"
-                    f"Date: {payment_date}"
+            if subscription_id:
+                pool = await get_pool()
+                row = await pool.fetchrow(
+                    "SELECT user_id, bot_name, username FROM members WHERE stripe_subscription_id = $1",
+                    subscription_id
                 )
-                try:
-                    await bot.send_message(promoter_id, promoter_text)
-                except Exception as e:
-                    logger.error(f"Promoter notification failed for {bot_name}: {e}")
 
-            await log_action(pool, user_id, f'payment_stripe_{plan}', amount_paid, bot_name)
-            logger.info(f"Invoice payment handled for user {user_id} on {bot_name}")
+                if row:
+                    user_id = row['user_id']
+                    bot_name = row['bot_name']
+                    username = row['username'] or f"ID{user_id}"
 
-    except Exception as e:
-        logger.error(f"Stripe event handling error: {str(e)}")
-        raise HTTPException(status_code=500)
+                    amount = invoice['amount_paid'] / 100.0
+                    plan = "monthly"  # 재결제는 기본 monthly로 가정 (필요시 DB에 plan 저장 후 사용)
 
-    return "", 200
+                    is_renewal = invoice.get('billing_reason') == 'subscription_cycle'
 
-@app.post("/webhook/{token}")
-async def telegram_webhook(token: str, request: Request):
-    telegram_app = next(
-        (a["app"] for a in applications.values() if a["app"].bot.token == token),
-        None
-    )
-    if not telegram_app:
-        raise HTTPException(404)
+                    msg = (
+                        f"{'🔄 **Subscription Renewed**' if is_renewal else '💳 **Payment Succeeded**'}\n\n"
+                        f"• Bot: {bot_name.upper()}\n"
+                        f"• User: @{username} (ID: {user_id})\n"
+                        f"• Amount: ${amount:.2f}\n"
+                        f"• Subscription: {subscription_id[:12]}...\n"
+                        f"• Time: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+                    )
 
-    data = await request.json()
-    update = Update.de_json(data, telegram_app.bot)
-    await telegram_app.process_update(update)
-    return "OK"
+                    # Admin 알림
+                    try:
+                        await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
+                    except:
+                        pass
 
-async def handle_payment_success(user_id, username, session, is_lifetime, expiry, bot_name, plan, amount, email):
-    try:
-        pool = await get_pool()
-        customer_id = session.get('customer')
-        subscription_id = session.get('subscription')
+                    # Promoter 알림
+                    promoter_id = None
+                    if bot_name == "lust4trans":
+                        promoter_id = int(LUST4TRANS_PROMOTER_ID or 0)
+                    elif bot_name == "tswrld":
+                        promoter_id = int(TSWRLDBOT_PROMOTER_ID or 0)
 
-        now = datetime.datetime.utcnow()
-        log_check = await pool.fetchval(
-            'SELECT COUNT(*) FROM daily_logs WHERE user_id = $1 AND action = $2 AND timestamp > $3',
-            user_id, f'payment_stripe_{plan}', now - datetime.timedelta(minutes=5)
-        )
-        if log_check > 0:
-            logger.info(f"Duplicate checkout event for user {user_id}, skipping.")
-            return
+                    if promoter_id and promoter_id != ADMIN_USER_ID and bot_name in applications:
+                        try:
+                            await applications[bot_name]["app"].bot.send_message(promoter_id, msg, parse_mode='Markdown')
+                        except Exception as e:
+                            logger.error(f"Promoter {promoter_id} ({bot_name}) notify fail: {e}")
 
-        await add_member(pool, user_id, username, customer_id, subscription_id, is_lifetime, expiry, bot_name, email)
-        await log_action(pool, user_id, f'payment_stripe_{plan}', amount, bot_name)
+                    logger.info(f"Renewal notification sent - bot:{bot_name} user:{user_id}")
 
-        # bot_instance 가져오기 (letmebot special case 개선)
-        key = bot_name  # 그대로 사용 (replace 제거, BOT_CLASSES 키와 동일)
-        if key not in applications:
-            logger.error(f"Bot key {key} not found for {bot_name}")
-            return
-        bot = applications[key]["app"].bot
-
-        # 초대 링크 전송 로그 추가
-        logger.info(f"Sending invite link to user {user_id} for {bot_name}")
-
-        invite_link, expiry_str = await create_invite_link(bot)
-        user_text = (
-            f"✅ Payment successful!\n\n"
-            f"Plan: {plan.capitalize()}\n"
-            f"Amount: ${amount}\n"
-            f"Join the channel: {invite_link}\n"
-            f"Expires: {expiry_str}"
-        )
-        await bot.send_message(user_id, user_text)
-
-        admin_text = (
-            f"🔔 New Stripe Payment!\n\n"
-            f"User ID: {user_id}\n"
-            f"Username: @{username.lstrip('@') if username.startswith('@') else username}\n"
-            f"Email: {email}\n"
-            f"Bot: {bot_name}\n"
-            f"Plan: {plan.capitalize()}\n"
-            f"Amount: ${amount}\n"
-            f"Customer ID: {customer_id}\n"
-            f"Subscription ID: {subscription_id or 'N/A'}\n"
-            f"Expiry: {expiry.strftime('%Y-%m-%d %H:%M UTC') if expiry else 'Lifetime'}"
-        )
-        await bot.send_message(ADMIN_USER_ID, admin_text)
-
-        if bot_name == "lust4trans" and LUST4TRANS_PROMOTER_ID:
-            promoter_text = (
-                f"🔔 Lust4trans New Payment!\n\n"
-                f"User ID: {user_id}\n"
-                f"Plan: {plan.capitalize()}\n"
-                f"Amount: ${amount}"
-            )
-            await bot.send_message(LUST4TRANS_PROMOTER_ID, promoter_text)
-        elif bot_name == "tswrld" and TSWRLDBOT_PROMOTER_ID:
-            promoter_text = (
-                f"🔔 TsWrld New Payment!\n\n"
-                f"User ID: {user_id}\n"
-                f"Plan: {plan.capitalize()}\n"
-                f"Amount: ${amount}"
-            )
-            await bot.send_message(TSWRLDBOT_PROMOTER_ID, promoter_text)
-
-        logger.info(f"Payment success handled for user {user_id} on {bot_name}")
+        # 다른 이벤트는 무시하거나 기존 로직 유지 (필요 시 추가)
 
     except Exception as e:
-        logger.error(f"handle_payment_success error: {str(e)}")
+        logger.error(f"Webhook processing error: {e}")
+
+    return {"status": "success"}
 
 async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"/paid command detected - user_id: {update.effective_user.id}, args: {context.args}")
-    args = context.args
-    if len(args) != 2:
-        await update.message.reply_text("Usage: /paid [user_id] [plan]\nExample: /paid 123456789 weekly")
-        return
-
+    user_id = update.effective_user.id
     try:
-        user_id = int(args[0])
-        plan = args[1].lower()
-
-        if plan not in ['weekly', 'monthly']:
-            await update.message.reply_text("Plan must be weekly or monthly.")
+        # admin만 사용 가능 가정
+        if user_id != ADMIN_USER_ID:
+            await update.message.reply_text("Admin only command.")
             return
 
+        args = context.args
+        if not args:
+            await update.message.reply_text("Usage: /paid <user_id> <bot_name>")
+            return
+
+        target_user_id = int(args[0])
+        bot_name = args[1] if len(args) > 1 else 'letmebot'  # 기본값
+
         pool = await get_pool()
-
-        days = 7 if plan == 'weekly' else 30
-        kick_at = datetime.datetime.utcnow() + datetime.timedelta(days=days)
-        expiry = kick_at  # Daily Report에 포함되게 expiry도 설정
-
-        async with pool.acquire() as conn:
-            await conn.execute(
-                'UPDATE members SET kick_scheduled_at = $1, expiry = $1 WHERE user_id = $2 AND active = TRUE',
-                kick_at, user_id
-            )
-
-        await update.message.reply_text(
-            f"✅ /paid processed!\n"
-            f"User ID: {user_id}\n"
-            f"Plan: {plan}\n"
-            f"Scheduled kick & expiry: {kick_at.strftime('%Y-%m-%d %H:%M UTC')}\n"
-            f"Daily Report에 만료 알림으로 포함됩니다."
+        await pool.execute(
+            'UPDATE members SET active = TRUE WHERE user_id = $1 AND bot_name = $2',
+            target_user_id, bot_name
         )
-
+        await update.message.reply_text(f"User {target_user_id} paid status updated for {bot_name}.")
     except Exception as e:
-        logger.error(f"/paid error: {str(e)}")
+        logger.error(f"/paid error: {e}")
         await update.message.reply_text(f"Error: {str(e)}")
 
 async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info(f"/kick command detected - user_id: {update.effective_user.id}, args: {context.args}")
-    args = context.args
-    if len(args) != 1:
-        await update.message.reply_text("Usage: /kick [user_id]\nExample: /kick 123456789")
-        return
-
+    user_id = update.effective_user.id
     try:
-        user_id = int(args[0])
+        # admin만 사용 가능 가정
+        if user_id != ADMIN_USER_ID:
+            await update.message.reply_text("Admin only command.")
+            return
+
+        args = context.args
+        if not args:
+            await update.message.reply_text("Usage: /kick <user_id>")
+            return
+
+        target_user_id = int(args[0])
 
         kicked = False
-        for key, app_info in applications.items():
-            bot = app_info["app"].bot
+        for key in applications.keys():
+            bot = applications[key]["app"].bot
             try:
                 await bot.ban_chat_member(
                     chat_id=CHANNEL_ID,
-                    user_id=user_id
+                    user_id=target_user_id
                 )
-                logger.info(f"강제 kick 성공 - User {user_id} from {key}")
+                logger.info(f"강제 kick 성공 - User {target_user_id} from {key}")
                 kicked = True
             except Exception as e:
-                logger.error(f"kick 실패 - User {user_id} from {key}: {e}")
+                logger.error(f"kick 실패 - User {target_user_id} from {key}: {e}")
 
         pool = await get_pool()
         rows = await pool.fetch(
             'SELECT bot_name FROM members WHERE user_id = $1 AND active = TRUE',
-            user_id
+            target_user_id
         )
 
         if rows:
@@ -364,19 +285,19 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     bot_name = row['bot_name']
                     await conn.execute(
                         'UPDATE members SET active = FALSE WHERE user_id = $1 AND bot_name = $2',
-                        user_id, bot_name
+                        target_user_id, bot_name
                     )
-            logger.info(f"DB active=FALSE 업데이트 완료 - User {user_id}")
+            logger.info(f"DB active=FALSE 업데이트 완료 - User {target_user_id}")
 
         if kicked:
             await update.message.reply_text(
                 f"✅ 강제 Kick 완료!\n"
-                f"User ID: {user_id}\n"
+                f"User ID: {target_user_id}\n"
                 f"채널에서 강제로 추방되었습니다."
             )
         else:
             await update.message.reply_text(
-                f"User ID {user_id} kick 실패.\n"
+                f"User ID {target_user_id} kick 실패.\n"
                 f"채널에서 찾을 수 없거나 권한 문제일 수 있습니다."
             )
 
