@@ -63,7 +63,7 @@ async def startup_event():
             time=datetime.time(hour=9, minute=0, tzinfo=datetime.timezone.utc)
         )
 
-        webhook_url = f"{RENDER_EXTERNAL_URL}/webhook/{cfg['token']}"
+        webhook_url = f"{RENDER_EXTERNAL_URL}/webhook/{key}"
         try:
             await telegram_app.bot.set_webhook(url=webhook_url)
             logger.info(f"{key} webhook set: {webhook_url}")
@@ -81,6 +81,22 @@ async def startup_event():
 @app.get("/health")
 async def health():
     return "OK"
+
+@app.post("/webhook/{bot_key}")
+async def telegram_webhook(request: Request, bot_key: str):
+    if bot_key not in applications:
+        logger.error(f"Unknown bot_key: {bot_key}")
+        raise HTTPException(status_code=404)
+    
+    telegram_app = applications[bot_key]["app"]
+    try:
+        json_data = await request.json()
+        update = Update.de_json(json_data, telegram_app.bot)
+        await telegram_app.process_update(update)
+        return {"status": "ok"}
+    except Exception as e:
+        logger.error(f"Telegram webhook error for {bot_key}: {e}")
+        raise HTTPException(status_code=400)
 
 @app.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
