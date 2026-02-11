@@ -98,7 +98,7 @@ async def telegram_webhook(request: Request, bot_key: str):
         logger.error(f"Telegram webhook error for {bot_key}: {e}")
         raise HTTPException(status_code=400)
 
-@app.post("/webhook/stripe")
+@app.post("/stripe_webhook")  # ← 경로 변경: /webhook/stripe → /stripe_webhook
 async def stripe_webhook(request: Request):
     payload = await request.body()
     sig_header = request.headers.get('Stripe-Signature')
