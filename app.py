@@ -183,18 +183,18 @@ async def stripe_webhook(request: Request):
                     except Exception as e:
                         logger.error(f"Promoter notify fail {promoter_id}: {e}")
 
-        elif event_type == "invoice.payment_succeeded":
-            invoice = event['data']['object']
-            subscription_id = invoice.get('subscription')
+        elif event_type in ("invoice.payment_succeeded", "invoice.paid"):
+    invoice = event['data']['object']
+    subscription_id = invoice.get('subscription')
 
-            if subscription_id:
-                pool = await get_pool()
-                row = await pool.fetchrow(
-                    "SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1",
-                    subscription_id
-                )
+    if subscription_id:
+        pool = await get_pool()
+        row = await pool.fetchrow(
+            "SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1",
+            subscription_id
+        )
 
-                if row:
+        if row:
                     user_id = row['user_id']
                     bot_name = row['bot_name']
                     username = row['username'] or f"ID{user_id}"
