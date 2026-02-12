@@ -60,6 +60,7 @@ async def startup_event():
         telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_id=ADMIN_USER_ID) | filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
 
         telegram_app.add_handler(CommandHandler("transactions", transaction_report.transactions_command))  # ← 추가: 새 명령어
+        telegram_app.add_handler(CommandHandler("sync_stripe", transaction_report.sync_stripe_command))  # ← 추가: Stripe 동기화 명령어
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
@@ -152,7 +153,7 @@ async def stripe_webhook(request: Request):
 
                 # 첫 결제 알림 → admin & promoter
                 amount = session['amount_total'] / 100
-                email_display = f"• Email: {email}" if email != 'unknown' else ''
+                email_display = f"• Email: {email}" if email and email != 'unknown' else ''
                 msg = (
                     f"💳 **New Subscription (First Payment)**\n\n"
                     f"• Bot: {bot_name.upper()}\n"
@@ -202,9 +203,11 @@ async def stripe_webhook(request: Request):
                     amount = invoice['amount_paid'] / 100.0
                     plan = "monthly"  # 재결제는 기본 monthly로 가정 (필요시 DB에 plan 저장 후 사용)
 
+                    await log_action(pool, user_id, 'payment_stripe_renewal', amount, bot_name)  # ← 추가: 재결제 로그
+
                     is_renewal = invoice.get('billing_reason') == 'subscription_cycle'
 
-                    email_display = f"• Email: {email}" if email != 'unknown' else ''
+                    email_display = f"• Email: {email}" if email and email != 'unknown' else ''
                     msg = (
                         f"{'🔄 **Subscription Renewed**' if is_renewal else '💳 **Payment Succeeded**'}\n\n"
                         f"• Bot: {bot_name.upper()}\n"
