@@ -44,34 +44,41 @@ async def transactions_command(update: Update, context: ContextTypes.DEFAULT_TYP
     # DataFrame 생성
     try:
         df = pd.DataFrame(rows)
-        logger.info(f"DataFrame columns: {df.columns.tolist()}")
+        logger.info(f"Columns in DataFrame: {df.columns.tolist()}")
     except Exception as e:
         logger.error(f"DataFrame creation failed: {e}")
-        await update.message.reply_text("Error loading data. Check logs.")
+        await update.message.reply_text("데이터 로드 중 오류 발생. 로그 확인 필요.")
         return
 
-    # timestamp 컬럼 안전하게 찾기 (alias 실패 대비)
+    # timestamp 컬럼 자동 찾기 (alias 실패 대비)
     time_col = None
+    possible_names = ['timestamp', 'payment_time_utc', 'time', 'created_at']
     for col in df.columns:
-        if 'timestamp' in col.lower() or 'time' in col.lower():
+        if any(name.lower() in col.lower() for name in possible_names):
             time_col = col
             break
 
     if not time_col:
-        logger.error("No timestamp column found in query result")
-        await update.message.reply_text("Internal error: timestamp column missing.")
+        logger.error("No timestamp-like column found. Available columns: " + str(df.columns.tolist()))
+        await update.message.reply_text("내부 오류: 날짜 컬럼을 찾을 수 없음.")
         return
 
-    # Edmonton 시간 변환 (tz-aware 처리)
+    # 시간대 변환 (tz-aware 처리)
     edmonton_tz = pytz.timezone('America/Edmonton')
-    df[time_col] = df[time_col].apply(lambda x: x.replace(tzinfo=pytz.utc) if x and x.tzinfo is None else x)
+    df[time_col] = df[time_col].apply(
+        lambda x: x.replace(tzinfo=pytz.utc) if x and getattr(x, 'tzinfo', None) is None else x
+    )
     df['payment_time_edmonton'] = df[time_col].apply(
         lambda x: x.astimezone(edmonton_tz).strftime('%Y-%m-%d %H:%M:%S') if x else 'N/A'
     )
 
-    # 컬럼 재배치 및 email 처리
+    # email 안전 처리
     df['email'] = df['email'].apply(lambda x: x if x and x != 'unknown' else '')
-    df = df[['payment_time_edmonton', 'amount', 'success', 'payment_type', 'email', 'telegram_user_id', 'telegram_username']]
+
+    # 최종 컬럼 정리 (없는 컬럼은 스킵)
+    final_columns = ['payment_time_edmonton', 'amount', 'success', 'payment_type', 'email', 'telegram_user_id', 'telegram_username']
+    available_columns = [col for col in final_columns if col in df.columns]
+    df = df[available_columns]
 
     # 엑셀 생성
     output = io.BytesIO()
