@@ -98,7 +98,7 @@ async def telegram_webhook(request: Request, bot_key: str):
         logger.error(f"Telegram webhook error for {bot_key}: {e}")
         raise HTTPException(status_code=400)
 
-@app.post("/stripe_webhook")  # ← 경로 변경: /webhook/stripe → /stripe_webhook
+@app.post("/stripe_webhook")
 async def stripe_webhook(request: Request):
     payload = await request.body()
     sig_header = request.headers.get('Stripe-Signature')
@@ -149,10 +149,12 @@ async def stripe_webhook(request: Request):
 
                 # 첫 결제 알림 → admin & promoter
                 amount = session['amount_total'] / 100
+                email_display = f"• Email: {email}" if email != 'unknown' else ''
                 msg = (
                     f"💳 **New Subscription (First Payment)**\n\n"
                     f"• Bot: {bot_name.upper()}\n"
                     f"• User: @{username} (ID: {user_id})\n"
+                    f"{email_display}\n"
                     f"• Plan: {plan.capitalize()}\n"
                     f"• Amount: ${amount:.2f}\n"
                     f"• Time: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
@@ -184,7 +186,7 @@ async def stripe_webhook(request: Request):
             if subscription_id:
                 pool = await get_pool()
                 row = await pool.fetchrow(
-                    "SELECT user_id, bot_name, username FROM members WHERE stripe_subscription_id = $1",
+                    "SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1",
                     subscription_id
                 )
 
@@ -192,16 +194,19 @@ async def stripe_webhook(request: Request):
                     user_id = row['user_id']
                     bot_name = row['bot_name']
                     username = row['username'] or f"ID{user_id}"
+                    email = row['email'] or 'unknown'
 
                     amount = invoice['amount_paid'] / 100.0
                     plan = "monthly"  # 재결제는 기본 monthly로 가정 (필요시 DB에 plan 저장 후 사용)
 
                     is_renewal = invoice.get('billing_reason') == 'subscription_cycle'
 
+                    email_display = f"• Email: {email}" if email != 'unknown' else ''
                     msg = (
                         f"{'🔄 **Subscription Renewed**' if is_renewal else '💳 **Payment Succeeded**'}\n\n"
                         f"• Bot: {bot_name.upper()}\n"
                         f"• User: @{username} (ID: {user_id})\n"
+                        f"{email_display}\n"
                         f"• Amount: ${amount:.2f}\n"
                         f"• Subscription: {subscription_id[:12]}...\n"
                         f"• Time: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
