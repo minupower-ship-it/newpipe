@@ -19,6 +19,7 @@ from config import (
     LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN, LUST4TRANS_TOKEN,
     LUST4TRANS_PROMOTER_ID, TSWRLDBOT_PROMOTER_ID, CHANNEL_ID, PLAN_PRICES
 )
+import transaction_report  # ← 추가: 새 파일 import
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -57,6 +58,8 @@ async def startup_event():
 
         # /stats 명령어 - 관리자 + Lust4trans 홍보자 전용 (v19 이하 호환)
         telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_id=ADMIN_USER_ID) | filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
+
+        telegram_app.add_handler(CommandHandler("transactions", transaction_report.transactions_command))  # ← 추가: 새 명령어
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
