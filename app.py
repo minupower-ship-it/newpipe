@@ -19,7 +19,7 @@ from config import (
     LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN, LUST4TRANS_TOKEN,
     LUST4TRANS_PROMOTER_ID, TSWRLDBOT_PROMOTER_ID, CHANNEL_ID, PLAN_PRICES
 )
-import transaction_report  # ← 추가: 새 파일 import
+import transaction_report
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -47,20 +47,13 @@ async def startup_event():
         telegram_app.add_handler(CommandHandler("start", bot_instance.start))
         telegram_app.add_handler(CallbackQueryHandler(bot_instance.button_handler))
 
-        # /paid 명령어 - 제한 제거
         telegram_app.add_handler(CommandHandler("paid", paid_command))
-
-        # /kick 명령어 - 제한 제거 + 강제 kick
         telegram_app.add_handler(CommandHandler("kick", kick_command))
-
-        # /user 명령어 - 관리자 + Lust4trans 홍보자 전용 (v19 이하 호환)
         telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=ADMIN_USER_ID) | filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
-
-        # /stats 명령어 - 관리자 + Lust4trans 홍보자 전용 (v19 이하 호환)
         telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_id=ADMIN_USER_ID) | filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
 
-        telegram_app.add_handler(CommandHandler("transactions", transaction_report.transactions_command))  # ← 추가: 새 명령어
-        telegram_app.add_handler(CommandHandler("sync_stripe", transaction_report.sync_stripe_command))  # ← 추가: Stripe 동기화 명령어
+        telegram_app.add_handler(CommandHandler("transactions", transaction_report.transactions_command))
+        telegram_app.add_handler(CommandHandler("sync_stripe", transaction_report.sync_stripe_command))
 
         telegram_app.job_queue.run_daily(
             send_daily_report,
@@ -142,7 +135,6 @@ async def stripe_webhook(request: Request):
                 )
                 await log_action(pool, user_id, f'payment_stripe_{plan}', session['amount_total'] / 100, bot_name)
 
-                # 첫 결제 성공 시 invite link 생성 및 알림 (기존 동작 유지)
                 if bot_name in applications:
                     bot = applications[bot_name]["app"].bot
                     link, expiry_str = await create_invite_link(bot)
@@ -151,7 +143,6 @@ async def stripe_webhook(request: Request):
                         f"✅ Payment successful!\n\nYour invite link (expires in 5 min):\n{link}\n\n{expiry_str}"
                     )
 
-                # 첫 결제 알림 → admin & promoter
                 amount = session['amount_total'] / 100
                 email_display = f"• Email: {email}" if email and email != 'unknown' else ''
                 msg = (
@@ -164,13 +155,11 @@ async def stripe_webhook(request: Request):
                     f"• Time: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
                 )
 
-                # Admin
                 try:
-                    await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')  # 아무 bot 써도 됨
+                    await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
                 except:
                     pass
 
-                # Promoter
                 promoter_id = None
                 if bot_name == "lust4trans":
                     promoter_id = int(LUST4TRANS_PROMOTER_ID or 0)
@@ -184,26 +173,38 @@ async def stripe_webhook(request: Request):
                         logger.error(f"Promoter notify fail {promoter_id}: {e}")
 
         elif event_type in ("invoice.payment_succeeded", "invoice.paid"):
-    invoice = event['data']['object']
-    subscription_id = invoice.get('subscription')
+            invoice = event['data']['object']
+            subscription_id = invoice.get('subscription')
 
-    if subscription_id:
-        pool = await get_pool()
-        row = await pool.fetchrow(
-            "SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1",
-            subscription_id
-        )
+            if subscription_id:
+                pool = await get_pool()
+                row = await pool.fetchrow(
+                    "SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1",
+                    subscription_id
+                )
 
-        if row:
+                if row:
                     user_id = row['user_id']
                     bot_name = row['bot_name']
                     username = row['username'] or f"ID{user_id}"
                     email = row['email'] or 'unknown'
 
                     amount = invoice['amount_paid'] / 100.0
-                    plan = "monthly"  # 재결제는 기본 monthly로 가정 (필요시 DB에 plan 저장 후 사용)
+                    plan = "monthly"
 
-                    await log_action(pool, user_id, 'payment_stripe_renewal', amount, bot_name)  # ← 추가: 재결제 로그
+                    await log_action(pool, user_id, 'payment_stripe_renewal', amount, bot_name)
+
+                    # === 재결제 시 expiry 자동 연장 (추가된 부분) ===
+                    lines = invoice.get('lines', {}).get('data', [])
+                    description = lines[0].get('description', '') if lines else ''
+                    days = 7 if 'weekly' in description.lower() else 30
+                    new_expiry = datetime.datetime.utcnow() + datetime.timedelta(days=days)
+
+                    await pool.execute(
+                        "UPDATE members SET expiry = $1, active = TRUE WHERE stripe_subscription_id = $2",
+                        new_expiry, subscription_id
+                    )
+                    # ============================================
 
                     is_renewal = invoice.get('billing_reason') == 'subscription_cycle'
 
@@ -218,13 +219,11 @@ async def stripe_webhook(request: Request):
                         f"• Time: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
                     )
 
-                    # Admin 알림
                     try:
                         await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
                     except:
                         pass
 
-                    # Promoter 알림
                     promoter_id = None
                     if bot_name == "lust4trans":
                         promoter_id = int(LUST4TRANS_PROMOTER_ID or 0)
@@ -239,17 +238,15 @@ async def stripe_webhook(request: Request):
 
                     logger.info(f"Renewal notification sent - bot:{bot_name} user:{user_id}")
 
-        # 다른 이벤트는 무시하거나 기존 로직 유지 (필요 시 추가)
-
     except Exception as e:
         logger.error(f"Webhook processing error: {e}")
 
     return {"status": "success"}
 
+# 나머지 함수들 (paid_command, kick_command, user_count_command, lust4trans_stats_command)은 원본 그대로
 async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     try:
-        # admin만 사용 가능 가정
         if user_id != ADMIN_USER_ID:
             await update.message.reply_text("Admin only command.")
             return
@@ -260,7 +257,7 @@ async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         target_user_id = int(args[0])
-        bot_name = args[1] if len(args) > 1 else 'letmebot'  # 기본값
+        bot_name = args[1] if len(args) > 1 else 'letmebot'
 
         pool = await get_pool()
         await pool.execute(
@@ -275,7 +272,6 @@ async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     try:
-        # admin만 사용 가능 가정
         if user_id != ADMIN_USER_ID:
             await update.message.reply_text("Admin only command.")
             return
