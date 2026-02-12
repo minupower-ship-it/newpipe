@@ -3,7 +3,7 @@ import datetime
 import logging
 from telegram.ext import ContextTypes
 from config import CHANNEL_ID, ADMIN_USER_ID
-from bot_core.db import get_pool, get_near_expiry, get_expired_today, get_daily_stats
+from bot_core.db import get_pool
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,23 @@ async def create_invite_link(bot):
     )
     expiry_str = expire_date.strftime('%Y-%m-%d %H:%M UTC') + " (5 minutes)"
     return link.invite_link, expiry_str
+
+async def get_near_expiry(pool):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch('''
+            SELECT user_id, username, bot_name, (expiry::date - CURRENT_DATE) AS days_left, email
+            FROM members
+            WHERE active = TRUE AND NOT is_lifetime AND (expiry::date - CURRENT_DATE) IN (1, 3)
+        ''')
+    return [(r['user_id'], r['username'] or f"ID{r['user_id']}", r['bot_name'], r['days_left'], r['email'] or 'unknown') for r in rows]
+
+async def get_expired_today(pool):
+    async with pool.acquire() as conn:
+        rows = await conn.fetch('''
+            SELECT user_id, username, bot_name, email FROM members
+            WHERE active = TRUE AND NOT is_lifetime AND expiry::date = CURRENT_DATE
+        ''')
+    return [(r['user_id'], r['username'] or f"ID{r['user_id']}", r['bot_name'], r['email'] or 'unknown') for r in rows]
 
 async def send_daily_report(context: ContextTypes.DEFAULT_TYPE):
     pool = await get_pool()
