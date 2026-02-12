@@ -3,11 +3,12 @@ import io
 import datetime
 import pytz
 import pandas as pd
-from telegram.ext import ContextTypes
+from telegram import Update  # ← 추가: Update import
+from telegram.ext import ContextTypes  # ← 추가: ContextTypes import
 from bot_core.db import get_pool
 from config import ADMIN_USER_ID
 
-async def transactions_command(update: datetime.Update, context: ContextTypes.DEFAULT_TYPE):
+async def transactions_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id != ADMIN_USER_ID:
         await update.message.reply_text("Admin only command.")
