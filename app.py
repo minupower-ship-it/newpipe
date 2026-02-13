@@ -156,7 +156,7 @@ async def stripe_webhook(request: Request):
                 )
 
                 try:
-                    await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
+                    await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg)
                 except:
                     pass
 
@@ -168,7 +168,7 @@ async def stripe_webhook(request: Request):
 
                 if promoter_id and promoter_id != ADMIN_USER_ID:
                     try:
-                        await applications[bot_name]["app"].bot.send_message(promoter_id, msg, parse_mode='Markdown')
+                        await applications[bot_name]["app"].bot.send_message(promoter_id, msg)
                     except Exception as e:
                         logger.error(f"Promoter notify fail {promoter_id}: {e}")
 
