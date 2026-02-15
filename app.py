@@ -3,7 +3,7 @@ import os
 import datetime
 import logging
 import stripe
-import html  # email escape 용
+import html
 import time
 from typing import Dict
 from fastapi import FastAPI, Request, HTTPException
@@ -39,7 +39,7 @@ BOT_CLASSES = {
 
 applications = {}
 
-# Stripe 중복 알림 방지용 (subscription_id → last notified time)
+# 중복 알림 방지용 (subscription_id 기준)
 recent_notifications: Dict[str, float] = {}
 
 @app.on_event("startup")
@@ -126,8 +126,10 @@ async def stripe_webhook(request: Request):
     subscription_id = data_object.get('id') or data_object.get('subscription', 'N/A')
     current_time = time.time()
 
-    # 5분 내 동일 subscription_id 알림 스킵
-    if subscription_id != 'N/A' and subscription_id in recent_notifications:
+    # 결제 성공 관련 이벤트는 중복 스킵하지 않음 (중요 이벤트 놓치지 않기 위해)
+    skip_duplicate = event_type not in ("checkout.session.completed", "invoice.payment_succeeded", "invoice.paid")
+
+    if skip_duplicate and subscription_id != 'N/A' and subscription_id in recent_notifications:
         if current_time - recent_notifications[subscription_id] < 300:
             logger.info(f"Skipping duplicate notification for sub {subscription_id} (event: {event_type})")
             return {"status": "skipped_duplicate"}
@@ -186,8 +188,9 @@ async def stripe_webhook(request: Request):
 
                 try:
                     await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
-                except Exception:
-                    pass
+                    logger.info(f"Admin notified - New Subscription - user:{user_id}")
+                except Exception as e:
+                    logger.error(f"Admin notify failed (new sub): {e}")
 
                 promoter_id = None
                 if bot_name == "lust4trans":
@@ -201,56 +204,63 @@ async def stripe_webhook(request: Request):
                     except Exception as e:
                         logger.error(f"Promoter notify fail {promoter_id}: {e}")
 
-        elif event_type == "customer.subscription.created":
-            logger.info(f"New subscription created (no notification): {subscription_id}")
-
-        elif event_type == "invoice.payment_succeeded":
+        elif event_type in ("invoice.payment_succeeded", "invoice.paid"):
             invoice = data_object
             subscription_id = invoice.get('subscription')
-            if subscription_id:
-                pool = await get_pool()
-                row = await pool.fetchrow(
-                    "SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1",
-                    subscription_id
-                )
-                if row:
-                    user_id = row['user_id']
-                    bot_name = row['bot_name']
-                    username = row['username'] or f"ID{user_id}"
-                    email = row['email'] or 'unknown'
+            if not subscription_id:
+                logger.info(f"Invoice event {event['id']} has no subscription - skipping")
+                return {"status": "no_subscription"}
 
-                    amount = invoice['amount_paid'] / 100.0
-                    is_renewal = invoice.get('billing_reason') == 'subscription_cycle'
+            pool = await get_pool()
+            row = await pool.fetchrow(
+                "SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1",
+                subscription_id
+            )
+            if not row:
+                logger.warning(f"No member found for subscription {subscription_id} in {event_type}")
+                return {"status": "no_member_found"}
 
-                    await log_action(pool, user_id, 'payment_stripe_renewal', amount, bot_name)
+            user_id = row['user_id']
+            bot_name = row['bot_name']
+            username = row['username'] or f"ID{user_id}"
+            email = row['email'] or 'unknown'
 
-                    email_display = f"• Email: {html.escape(email)}" if email and email != 'unknown' else ''
-                    msg = (
-                        f"{'🔄 **Subscription Renewed**' if is_renewal else '💳 **Payment Succeeded**'}\n\n"
-                        f"• Bot: {bot_name.upper()}\n"
-                        f"• User: @{username} (ID: {user_id})\n"
-                        f"{email_display}\n"
-                        f"• Amount: ${amount:.2f}\n"
-                        f"• Subscription: {subscription_id[:12]}...\n"
-                        f"• Time: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
-                    )
+            amount = invoice['amount_paid'] / 100.0
+            is_renewal = invoice.get('billing_reason') == 'subscription_cycle'
 
-                    try:
-                        await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
-                    except Exception:
-                        pass
+            await log_action(pool, user_id, 'payment_stripe_renewal', amount, bot_name)
 
-                    promoter_id = None
-                    if bot_name == "lust4trans":
-                        promoter_id = int(LUST4TRANS_PROMOTER_ID or 0)
-                    elif bot_name == "tswrld":
-                        promoter_id = int(TSWRLDBOT_PROMOTER_ID or 0)
+            email_display = f"• Email: {html.escape(email)}" if email and email != 'unknown' else ''
+            msg = (
+                f"{'🔄 **Subscription Renewed**' if is_renewal else '💳 **Payment Succeeded**'}\n\n"
+                f"• Bot: {bot_name.upper()}\n"
+                f"• User: @{username} (ID: {user_id})\n"
+                f"{email_display}\n"
+                f"• Amount: ${amount:.2f}\n"
+                f"• Subscription: {subscription_id[:12]}...\n"
+                f"• Invoice: {invoice.get('id', 'N/A')[:12]}...\n"
+                f"• Event: {event_type}\n"
+                f"• Time: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+            )
 
-                    if promoter_id and promoter_id != ADMIN_USER_ID and bot_name in applications:
-                        try:
-                            await applications[bot_name]["app"].bot.send_message(promoter_id, msg, parse_mode='Markdown')
-                        except Exception as e:
-                            logger.error(f"Promoter notify fail {promoter_id}: {e}")
+            try:
+                await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
+                logger.info(f"Admin notified successfully via {event_type} - user:{user_id} amount:${amount}")
+            except Exception as e:
+                logger.error(f"Admin notify failed for {event_type}: {e}")
+
+            promoter_id = None
+            if bot_name == "lust4trans":
+                promoter_id = int(LUST4TRANS_PROMOTER_ID or 0)
+            elif bot_name == "tswrld":
+                promoter_id = int(TSWRLDBOT_PROMOTER_ID or 0)
+
+            if promoter_id and promoter_id != ADMIN_USER_ID and bot_name in applications:
+                try:
+                    await applications[bot_name]["app"].bot.send_message(promoter_id, msg, parse_mode='Markdown')
+                    logger.info(f"Promoter notified via {event_type}")
+                except Exception as e:
+                    logger.error(f"Promoter notify fail {promoter_id}: {e}")
 
         elif event_type == "customer.subscription.updated":
             subscription = data_object
@@ -311,6 +321,9 @@ async def stripe_webhook(request: Request):
                             logger.error(f"Promoter notify fail {promoter_id}: {e}")
 
                     logger.info(f"Significant subscription update sent - bot:{bot_name} user:{user_id}")
+
+        elif event_type == "customer.subscription.created":
+            logger.info(f"New subscription created (no notification): {subscription_id}")
 
     except Exception as e:
         logger.error(f"Webhook processing error: {e}")
