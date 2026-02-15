@@ -7,10 +7,10 @@ import html  # email escape 용
 import time
 from typing import Dict
 from fastapi import FastAPI, Request, HTTPException
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram import Update
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, filters, ContextTypes
 from telegram.error import TimedOut
-from bot_core.db import get_pool, init_db, add_member, log_action, get_member_status
+from bot_core.db import get_pool, init_db, add_member, log_action
 from bot_core.utils import create_invite_link, send_daily_report
 from bots.let_mebot import LetMeBot
 from bots.morevids_bot import MoreVidsBot
@@ -39,8 +39,8 @@ BOT_CLASSES = {
 
 applications = {}
 
-# 중복 알림 방지용 캐시 (subscription_id → last notified timestamp)
-recent_notifications: Dict[str, float] = {}  # prod에서는 Redis 등으로 교체 추천
+# Stripe 중복 알림 방지용 (subscription_id → last notified time)
+recent_notifications: Dict[str, float] = {}
 
 @app.on_event("startup")
 async def startup_event():
@@ -56,8 +56,12 @@ async def startup_event():
         telegram_app.add_handler(CommandHandler("paid", paid_command))
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
-        telegram_app.add_handler(CommandHandler("user", user_count_command, filters=filters.User(user_id=ADMIN_USER_ID) | filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
-        telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command, filters=filters.User(user_id=ADMIN_USER_ID) | filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
+        telegram_app.add_handler(CommandHandler("user", user_count_command,
+                                                filters=filters.User(user_id=ADMIN_USER_ID) |
+                                                filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
+        telegram_app.add_handler(CommandHandler("stats", lust4trans_stats_command,
+                                                filters=filters.User(user_id=ADMIN_USER_ID) |
+                                                filters.User(user_id=int(LUST4TRANS_PROMOTER_ID))))
 
         telegram_app.add_handler(CommandHandler("transactions", transaction_report.transactions_command))
         telegram_app.add_handler(CommandHandler("sync_stripe", transaction_report.sync_stripe_command))
@@ -82,16 +86,18 @@ async def startup_event():
 
     logger.info(f"Registered applications keys: {list(applications.keys())}")
 
+
 @app.get("/health")
 async def health():
     return "OK"
+
 
 @app.post("/webhook/{bot_key}")
 async def telegram_webhook(request: Request, bot_key: str):
     if bot_key not in applications:
         logger.error(f"Unknown bot_key: {bot_key}")
         raise HTTPException(status_code=404)
-    
+
     telegram_app = applications[bot_key]["app"]
     try:
         json_data = await request.json()
@@ -101,6 +107,7 @@ async def telegram_webhook(request: Request, bot_key: str):
     except Exception as e:
         logger.error(f"Telegram webhook error for {bot_key}: {e}")
         raise HTTPException(status_code=400)
+
 
 @app.post("/stripe_webhook")
 async def stripe_webhook(request: Request):
@@ -119,16 +126,15 @@ async def stripe_webhook(request: Request):
     subscription_id = data_object.get('id') or data_object.get('subscription', 'N/A')
     current_time = time.time()
 
-    # 중복 방지: 같은 subscription_id 기준 5분(300초) 내 알림 스킵
+    # 5분 내 동일 subscription_id 알림 스킵
     if subscription_id != 'N/A' and subscription_id in recent_notifications:
         if current_time - recent_notifications[subscription_id] < 300:
             logger.info(f"Skipping duplicate notification for sub {subscription_id} (event: {event_type})")
             return {"status": "skipped_duplicate"}
 
     recent_notifications[subscription_id] = current_time
-    # 오래된 항목 정리 (메모리 누수 방지)
     if len(recent_notifications) > 200:
-        recent_notifications.clear()  # 간단 정리 (prod에서는 TTL 기반 정리)
+        recent_notifications.clear()
 
     try:
         logger.info(f"Processing webhook event - type: {event_type}, sub_id: {subscription_id}")
@@ -180,7 +186,7 @@ async def stripe_webhook(request: Request):
 
                 try:
                     await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
-                except:
+                except Exception:
                     pass
 
                 promoter_id = None
@@ -196,7 +202,6 @@ async def stripe_webhook(request: Request):
                         logger.error(f"Promoter notify fail {promoter_id}: {e}")
 
         elif event_type == "customer.subscription.created":
-            # 생성 시 알림 X (중복 방지), 로그만
             logger.info(f"New subscription created (no notification): {subscription_id}")
 
         elif event_type == "invoice.payment_succeeded":
@@ -232,7 +237,7 @@ async def stripe_webhook(request: Request):
 
                     try:
                         await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
-                    except:
+                    except Exception:
                         pass
 
                     promoter_id = None
@@ -254,8 +259,7 @@ async def stripe_webhook(request: Request):
                 previous_attrs = event.get('previous_attributes', {})
                 changed_keys = set(previous_attrs.keys())
 
-                # 사소한 업데이트 무시 (previous_attributes 없거나 의미없는 변경)
-                significant_changes = {'items', 'current_period_end', 'current_period_start', 'status', 'cancel_at', 'plan'}
+                significant_changes = {'items', 'current_period_end', 'current_period_start', 'status', 'cancel_at'}
                 if not changed_keys or not (changed_keys & significant_changes):
                     logger.info(f"Skipping minor subscription update for {subscription_id} (changes: {changed_keys})")
                     return {"status": "skipped_minor"}
@@ -271,7 +275,6 @@ async def stripe_webhook(request: Request):
                     username = row['username'] or f"ID{user_id}"
                     email = row['email'] or 'unknown'
 
-                    # amount 안전하게 가져오기 (최신 API 방식)
                     amount = 0.0
                     if subscription.get('items') and subscription['items'].get('data'):
                         amount = subscription['items']['data'][0].get('price', {}).get('unit_amount', 0) / 100.0
@@ -292,7 +295,7 @@ async def stripe_webhook(request: Request):
 
                     try:
                         await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
-                    except:
+                    except Exception:
                         pass
 
                     promoter_id = None
@@ -307,27 +310,171 @@ async def stripe_webhook(request: Request):
                         except Exception as e:
                             logger.error(f"Promoter notify fail {promoter_id}: {e}")
 
-                    logger.info(f"Significant subscription update notification sent - bot:{bot_name} user:{user_id}")
+                    logger.info(f"Significant subscription update sent - bot:{bot_name} user:{user_id}")
 
     except Exception as e:
         logger.error(f"Webhook processing error: {e}")
 
     return {"status": "success"}
 
-# 나머지 명령어 함수들 (paid_command, kick_command 등)은 변경 없음
-# ... (기존 코드 그대로 유지)
 
 async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (기존 코드)
+    user_id = update.effective_user.id
+    try:
+        if user_id != ADMIN_USER_ID:
+            await update.message.reply_text("Admin only command.")
+            return
+
+        args = context.args
+        if not args:
+            await update.message.reply_text("Usage: /paid <user_id> <bot_name>")
+            return
+
+        target_user_id = int(args[0])
+        bot_name = args[1] if len(args) > 1 else 'letmebot'
+
+        pool = await get_pool()
+        await pool.execute(
+            'UPDATE members SET active = TRUE WHERE user_id = $1 AND bot_name = $2',
+            target_user_id, bot_name
+        )
+        await update.message.reply_text(f"User {target_user_id} paid status updated for {bot_name}.")
+    except Exception as e:
+        logger.error(f"/paid error: {e}")
+        await update.message.reply_text(f"Error: {str(e)}")
+
 
 async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (기존 코드)
+    user_id = update.effective_user.id
+    try:
+        if user_id != ADMIN_USER_ID:
+            await update.message.reply_text("Admin only command.")
+            return
+
+        args = context.args
+        if not args:
+            await update.message.reply_text("Usage: /kick <user_id>")
+            return
+
+        target_user_id = int(args[0])
+
+        kicked = False
+        for key in applications.keys():
+            bot = applications[key]["app"].bot
+            try:
+                await bot.ban_chat_member(
+                    chat_id=CHANNEL_ID,
+                    user_id=target_user_id
+                )
+                logger.info(f"강제 kick 성공 - User {target_user_id} from {key}")
+                kicked = True
+            except Exception as e:
+                logger.error(f"kick 실패 - User {target_user_id} from {key}: {e}")
+
+        pool = await get_pool()
+        rows = await pool.fetch(
+            'SELECT bot_name FROM members WHERE user_id = $1 AND active = TRUE',
+            target_user_id
+        )
+
+        if rows:
+            async with pool.acquire() as conn:
+                for row in rows:
+                    bot_name = row['bot_name']
+                    await conn.execute(
+                        'UPDATE members SET active = FALSE WHERE user_id = $1 AND bot_name = $2',
+                        target_user_id, bot_name
+                    )
+            logger.info(f"DB active=FALSE 업데이트 완료 - User {target_user_id}")
+
+        if kicked:
+            await update.message.reply_text(
+                f"✅ 강제 Kick 완료!\n"
+                f"User ID: {target_user_id}\n"
+                f"채널에서 강제로 추방되었습니다."
+            )
+        else:
+            await update.message.reply_text(
+                f"User ID {target_user_id} kick 실패.\n"
+                f"채널에서 찾을 수 없거나 권한 문제일 수 있습니다."
+            )
+
+    except Exception as e:
+        logger.error(f"/kick error: {str(e)}")
+        await update.message.reply_text(f"Error: {str(e)}")
+
 
 async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (기존 코드)
+    user_id = update.effective_user.id
+    allowed_ids = [ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)]
+    if user_id not in allowed_ids:
+        await update.message.reply_text("This command is for admin or Lust4trans promoter only.")
+        return
+
+    pool = await get_pool()
+    today = datetime.datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+
+    count = await pool.fetchval(
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'lust4trans' AND timestamp >= $1
+        ''',
+        today
+    )
+
+    await update.message.reply_text(
+        f"Today's unique users on Lust4trans bot: **{count or 0}**"
+    )
+
 
 async def lust4trans_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # ... (기존 코드)
+    user_id = update.effective_user.id
+    allowed_ids = [ADMIN_USER_ID, int(LUST4TRANS_PROMOTER_ID)]
+    if user_id not in allowed_ids:
+        await update.message.reply_text("This command is for admin or Lust4trans promoter only.")
+        return
+
+    pool = await get_pool()
+
+    weekly_count = await pool.fetchval(
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'lust4trans' 
+        AND action = 'payment_stripe_weekly'
+        '''
+    )
+    monthly_count = await pool.fetchval(
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'lust4trans' 
+        AND action = 'payment_stripe_monthly'
+        '''
+    )
+    lifetime_count = await pool.fetchval(
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'lust4trans' 
+        AND action = 'payment_stripe_lifetime'
+        '''
+    )
+
+    total_count = (weekly_count or 0) + (monthly_count or 0) + (lifetime_count or 0)
+    total_amount = (weekly_count or 0) * 11 + (monthly_count or 0) * 21 + (lifetime_count or 0) * 52
+
+    reply_text = (
+        f"Lust4trans Stripe 결제 성공 고객 수 (전체 기간 누적)\n\n"
+        f"Weekly: {weekly_count or 0}명 (${(weekly_count or 0) * 11})\n"
+        f"Monthly: {monthly_count or 0}명 (${(monthly_count or 0) * 21})\n"
+        f"Lifetime: {lifetime_count or 0}명 (${(lifetime_count or 0) * 52})\n\n"
+        f"총: {total_count}명 (${total_amount})"
+    )
+
+    await update.message.reply_text(reply_text)
+
 
 if __name__ == "__main__":
     import uvicorn
