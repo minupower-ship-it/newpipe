@@ -3,7 +3,7 @@ import os
 import datetime
 import logging
 import stripe
-import html  # ← 추가: email escape용
+import html  # 추가: email escape 용
 from fastapi import FastAPI, Request, HTTPException
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
@@ -118,6 +118,8 @@ async def stripe_webhook(request: Request):
     event_type = event['type']
 
     try:
+        logger.info(f"Webhook event received - type: {event_type}, subscription_id: {event['data']['object'].get('subscription', 'N/A')}")
+
         if event_type == "checkout.session.completed":
             session = event['data']['object']
             user_id = int(session['metadata'].get('user_id', 0))
@@ -167,7 +169,7 @@ async def stripe_webhook(request: Request):
 
                 # Admin
                 try:
-                    await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg)  # 아무 bot 써도 됨
+                    await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
                 except:
                     pass
 
@@ -180,7 +182,7 @@ async def stripe_webhook(request: Request):
 
                 if promoter_id and promoter_id != ADMIN_USER_ID:
                     try:
-                        await applications[bot_name]["app"].bot.send_message(promoter_id, msg)
+                        await applications[bot_name]["app"].bot.send_message(promoter_id, msg, parse_mode='Markdown')
                     except Exception as e:
                         logger.error(f"Promoter notify fail {promoter_id}: {e}")
 
@@ -221,7 +223,7 @@ async def stripe_webhook(request: Request):
 
                     # Admin 알림
                     try:
-                        await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg)
+                        await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
                     except:
                         pass
 
@@ -234,13 +236,13 @@ async def stripe_webhook(request: Request):
 
                     if promoter_id and promoter_id != ADMIN_USER_ID and bot_name in applications:
                         try:
-                            await applications[bot_name]["app"].bot.send_message(promoter_id, msg)
+                            await applications[bot_name]["app"].bot.send_message(promoter_id, msg, parse_mode='Markdown')
                         except Exception as e:
                             logger.error(f"Promoter notify fail {promoter_id}: {e}")
 
                     logger.info(f"Renewal notification sent - bot:{bot_name} user:{user_id}")
 
-        elif event_type == "customer.subscription.updated":
+        elif event_type == "customer.subscription.updated":  # 추가: 구독 갱신 알림
             subscription = event['data']['object']
             subscription_id = subscription.get('id')
 
@@ -258,6 +260,7 @@ async def stripe_webhook(request: Request):
                     email = row['email'] or 'unknown'
 
                     amount = subscription.get('plan', {}).get('amount', 0) / 100.0 if subscription.get('plan') else 0
+
                     await log_action(pool, user_id, 'payment_stripe_renewal', amount, bot_name)
 
                     is_renewal = subscription.get('billing_reason') == 'subscription_cycle'
@@ -274,7 +277,7 @@ async def stripe_webhook(request: Request):
 
                     # Admin 알림
                     try:
-                        await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg)
+                        await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
                     except:
                         pass
 
@@ -287,7 +290,7 @@ async def stripe_webhook(request: Request):
 
                     if promoter_id and promoter_id != ADMIN_USER_ID and bot_name in applications:
                         try:
-                            await applications[bot_name]["app"].bot.send_message(promoter_id, msg)
+                            await applications[bot_name]["app"].bot.send_message(promoter_id, msg, parse_mode='Markdown')
                         except Exception as e:
                             logger.error(f"Promoter notify fail {promoter_id}: {e}")
 
