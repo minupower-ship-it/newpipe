@@ -39,32 +39,28 @@ BOT_CLASSES = {
 
 applications = {}
 
-# 중복 방지 캐시
+# 중복 알림 방지용 캐시
 recent_notifications: Dict[str, float] = {}
 
 
 def get_subscription_id_from_event(event_type: str, data_object: dict) -> Optional[str]:
-    """Stripe 이벤트에서 subscription_id를 가장 안전하게 추출"""
-    if event_type == "checkout.session.completed":
-        return data_object.get('subscription')
+    """Stripe 이벤트에서 subscription_id를 최대한 정확하게 추출"""
+    # 1순위: top-level subscription
+    if data_object.get('subscription'):
+        return data_object['subscription']
 
-    # invoice 관련 이벤트 (가장 중요한 부분)
-    if event_type in ("invoice.payment_succeeded", "invoice.paid", "invoice.finalized"):
-        # 1순위: top-level
-        if data_object.get('subscription'):
-            return data_object['subscription']
-        # 2순위: lines.data 안에 있는 subscription (최근 Stripe에서 자주 발생)
-        lines = data_object.get('lines', {}).get('data', [])
-        for line in lines:
+    # 2순위: invoice의 line items 안에 있는 subscription
+    if 'lines' in data_object and 'data' in data_object['lines']:
+        for line in data_object['lines']['data']:
             if line.get('subscription'):
                 return line['subscription']
-        # 3순위: invoice ID를 fallback으로 사용
+
+    # 3순위: subscription 이벤트인 경우 id 자체
+    if event_type.startswith('customer.subscription'):
         return data_object.get('id')
 
-    if event_type.startswith("customer.subscription"):
-        return data_object.get('id')
-
-    return data_object.get('id') or data_object.get('subscription')
+    # fallback: 없으면 None 반환 (아래에서 customer fallback 사용)
+    return None
 
 
 @app.on_event("startup")
@@ -139,9 +135,11 @@ async def stripe_webhook(request: Request):
     payload = await request.body()
     sig_header = request.headers.get('Stripe-Signature')
     try:
-        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
     except Exception as e:
-        logger.error(f"Stripe signature verification failed: {e}")
+        logger.error(f"Stripe webhook signature verification failed: {e}")
         raise HTTPException(status_code=400)
 
     event_type = event['type']
@@ -149,11 +147,11 @@ async def stripe_webhook(request: Request):
     subscription_id = get_subscription_id_from_event(event_type, data_object)
     current_time = time.time()
 
-    # 결제 성공 이벤트는 중복 스킵 완전 제외
+    # 결제 성공 관련 이벤트는 중복 스킵하지 않음
     if event_type not in ("checkout.session.completed", "invoice.payment_succeeded", "invoice.paid"):
         if subscription_id and subscription_id in recent_notifications:
             if current_time - recent_notifications[subscription_id] < 300:
-                logger.info(f"Skipping duplicate: {event_type} {subscription_id}")
+                logger.info(f"Skipping duplicate notification for {event_type} sub {subscription_id}")
                 return {"status": "skipped_duplicate"}
 
     if subscription_id:
@@ -162,7 +160,6 @@ async def stripe_webhook(request: Request):
     try:
         logger.info(f"Processing: {event_type} | sub_id: {subscription_id or 'N/A'}")
 
-        # 첫 결제
         if event_type == "checkout.session.completed":
             session = data_object
             user_id = int(session['metadata'].get('user_id', 0))
@@ -226,24 +223,33 @@ async def stripe_webhook(request: Request):
                     except Exception as e:
                         logger.error(f"Promoter notify fail: {e}")
 
-        # 재결제 (이번 문제의 핵심)
         elif event_type in ("invoice.payment_succeeded", "invoice.paid"):
             invoice = data_object
             subscription_id = get_subscription_id_from_event(event_type, invoice)
 
-            if not subscription_id:
-                logger.warning(f"Invoice {invoice.get('id')} has no subscription_id - using invoice id as fallback")
-                subscription_id = invoice.get('id')
-
             pool = await get_pool()
-            row = await pool.fetchrow(
-                "SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1",
-                subscription_id
-            )
+            row = None
+
+            # 1차 시도: subscription_id로 조회
+            if subscription_id:
+                row = await pool.fetchrow(
+                    "SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1",
+                    subscription_id
+                )
+
+            # 2차 시도: subscription 못 찾았거나 row 없으면 customer_id로 fallback 조회
+            if not row and invoice.get('customer'):
+                row = await pool.fetchrow(
+                    "SELECT user_id, bot_name, username, email, stripe_subscription_id FROM members WHERE stripe_customer_id = $1",
+                    invoice['customer']
+                )
+                if row and row['stripe_subscription_id']:
+                    logger.info(f"Found by customer fallback - updating sub_id from {subscription_id} to {row['stripe_subscription_id']}")
+                    subscription_id = row['stripe_subscription_id']
 
             if not row:
-                logger.warning(f"Member not found for {subscription_id} (invoice: {invoice.get('id')})")
-                return {"status": "no_member"}
+                logger.warning(f"Member not found - sub:{subscription_id or 'N/A'} customer:{invoice.get('customer', 'N/A')}")
+                return {"status": "no_member_found"}
 
             user_id = row['user_id']
             bot_name = row['bot_name']
@@ -262,7 +268,7 @@ async def stripe_webhook(request: Request):
                 f"• User: @{username} (ID: {user_id})\n"
                 f"{email_display}\n"
                 f"• Amount: ${amount:.2f}\n"
-                f"• Subscription: {str(subscription_id)[:12]}...\n"
+                f"• Subscription: {str(subscription_id)[:12] if subscription_id else 'N/A'}...\n"
                 f"• Invoice: {invoice.get('id', 'N/A')[:12]}...\n"
                 f"• Event: {event_type}\n"
                 f"• Time: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
@@ -272,7 +278,7 @@ async def stripe_webhook(request: Request):
                 await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
                 logger.info(f"✅ ADMIN NOTIFIED via {event_type} - ${amount} user:{user_id}")
             except Exception as e:
-                logger.error(f"Admin notify failed: {e}")
+                logger.error(f"Admin notify failed for {event_type}: {e}")
 
             promoter_id = None
             if bot_name == "lust4trans":
@@ -283,22 +289,72 @@ async def stripe_webhook(request: Request):
             if promoter_id and promoter_id != ADMIN_USER_ID and bot_name in applications:
                 try:
                     await applications[bot_name]["app"].bot.send_message(promoter_id, msg, parse_mode='Markdown')
+                    logger.info(f"Promoter notified via {event_type}")
                 except Exception as e:
-                    logger.error(f"Promoter notify fail: {e}")
+                    logger.error(f"Promoter notify fail {promoter_id}: {e}")
 
         elif event_type == "customer.subscription.updated":
-            # 기존 로직 (중요 변경만 알림)
             subscription = data_object
             subscription_id = subscription.get('id')
             if subscription_id:
                 previous_attrs = event.get('previous_attributes', {})
                 changed_keys = set(previous_attrs.keys())
+
                 significant_changes = {'items', 'current_period_end', 'current_period_start', 'status', 'cancel_at'}
                 if not changed_keys or not (changed_keys & significant_changes):
-                    logger.info(f"Skipping minor update for {subscription_id}")
+                    logger.info(f"Skipping minor subscription update for {subscription_id}")
                     return {"status": "skipped_minor"}
 
-                # ... (기존 subscription.updated 로직 그대로)
+                pool = await get_pool()
+                row = await pool.fetchrow(
+                    "SELECT user_id, bot_name, username, email FROM members WHERE stripe_subscription_id = $1",
+                    subscription_id
+                )
+                if row:
+                    user_id = row['user_id']
+                    bot_name = row['bot_name']
+                    username = row['username'] or f"ID{user_id}"
+                    email = row['email'] or 'unknown'
+
+                    amount = 0.0
+                    if subscription.get('items') and subscription['items'].get('data'):
+                        amount = subscription['items']['data'][0].get('price', {}).get('unit_amount', 0) / 100.0
+
+                    is_renewal = 'current_period_end' in changed_keys
+
+                    email_display = f"• Email: {html.escape(email)}" if email and email != 'unknown' else ''
+                    msg = (
+                        f"{'🔄 **Subscription Renewed**' if is_renewal else '💳 **Subscription Updated**'}\n\n"
+                        f"• Bot: {bot_name.upper()}\n"
+                        f"• User: @{username} (ID: {user_id})\n"
+                        f"{email_display}\n"
+                        f"• Amount: ${amount:.2f}\n"
+                        f"• Subscription: {subscription_id[:12]}...\n"
+                        f"• Changed: {', '.join(changed_keys)}\n"
+                        f"• Time: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+                    )
+
+                    try:
+                        await applications["letmebot"]["app"].bot.send_message(ADMIN_USER_ID, msg, parse_mode='Markdown')
+                    except Exception:
+                        pass
+
+                    promoter_id = None
+                    if bot_name == "lust4trans":
+                        promoter_id = int(LUST4TRANS_PROMOTER_ID or 0)
+                    elif bot_name == "tswrld":
+                        promoter_id = int(TSWRLDBOT_PROMOTER_ID or 0)
+
+                    if promoter_id and promoter_id != ADMIN_USER_ID and bot_name in applications:
+                        try:
+                            await applications[bot_name]["app"].bot.send_message(promoter_id, msg, parse_mode='Markdown')
+                        except Exception as e:
+                            logger.error(f"Promoter notify fail {promoter_id}: {e}")
+
+                    logger.info(f"Significant subscription update sent - bot:{bot_name} user:{user_id}")
+
+        elif event_type == "customer.subscription.created":
+            logger.info(f"New subscription created (no notification): {subscription_id}")
 
     except Exception as e:
         logger.error(f"Webhook processing error: {e}")
@@ -350,11 +406,14 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for key in applications.keys():
             bot = applications[key]["app"].bot
             try:
-                await bot.ban_chat_member(chat_id=CHANNEL_ID, user_id=target_user_id)
-                logger.info(f"Kick success - User {target_user_id} from {key}")
+                await bot.ban_chat_member(
+                    chat_id=CHANNEL_ID,
+                    user_id=target_user_id
+                )
+                logger.info(f"강제 kick 성공 - User {target_user_id} from {key}")
                 kicked = True
             except Exception as e:
-                logger.error(f"Kick failed - User {target_user_id} from {key}: {e}")
+                logger.error(f"kick 실패 - User {target_user_id} from {key}: {e}")
 
         pool = await get_pool()
         rows = await pool.fetch(
@@ -365,18 +424,27 @@ async def kick_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if rows:
             async with pool.acquire() as conn:
                 for row in rows:
+                    bot_name = row['bot_name']
                     await conn.execute(
                         'UPDATE members SET active = FALSE WHERE user_id = $1 AND bot_name = $2',
-                        target_user_id, row['bot_name']
+                        target_user_id, bot_name
                     )
+            logger.info(f"DB active=FALSE 업데이트 완료 - User {target_user_id}")
 
         if kicked:
-            await update.message.reply_text(f"✅ 강제 Kick 완료! User ID: {target_user_id}")
+            await update.message.reply_text(
+                f"✅ 강제 Kick 완료!\n"
+                f"User ID: {target_user_id}\n"
+                f"채널에서 강제로 추방되었습니다."
+            )
         else:
-            await update.message.reply_text(f"User ID {target_user_id} kick 실패.")
+            await update.message.reply_text(
+                f"User ID {target_user_id} kick 실패.\n"
+                f"채널에서 찾을 수 없거나 권한 문제일 수 있습니다."
+            )
 
     except Exception as e:
-        logger.error(f"/kick error: {e}")
+        logger.error(f"/kick error: {str(e)}")
         await update.message.reply_text(f"Error: {str(e)}")
 
 
@@ -399,7 +467,9 @@ async def user_count_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
         today
     )
 
-    await update.message.reply_text(f"Today's unique users on Lust4trans: **{count or 0}**")
+    await update.message.reply_text(
+        f"Today's unique users on Lust4trans bot: **{count or 0}**"
+    )
 
 
 async def lust4trans_stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -412,25 +482,42 @@ async def lust4trans_stats_command(update: Update, context: ContextTypes.DEFAULT
     pool = await get_pool()
 
     weekly_count = await pool.fetchval(
-        "SELECT COUNT(DISTINCT user_id) FROM daily_logs WHERE bot_name = 'lust4trans' AND action = 'payment_stripe_weekly'"
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'lust4trans' 
+        AND action = 'payment_stripe_weekly'
+        '''
     )
     monthly_count = await pool.fetchval(
-        "SELECT COUNT(DISTINCT user_id) FROM daily_logs WHERE bot_name = 'lust4trans' AND action = 'payment_stripe_monthly'"
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'lust4trans' 
+        AND action = 'payment_stripe_monthly'
+        '''
     )
     lifetime_count = await pool.fetchval(
-        "SELECT COUNT(DISTINCT user_id) FROM daily_logs WHERE bot_name = 'lust4trans' AND action = 'payment_stripe_lifetime'"
+        '''
+        SELECT COUNT(DISTINCT user_id) 
+        FROM daily_logs 
+        WHERE bot_name = 'lust4trans' 
+        AND action = 'payment_stripe_lifetime'
+        '''
     )
 
     total_count = (weekly_count or 0) + (monthly_count or 0) + (lifetime_count or 0)
     total_amount = (weekly_count or 0) * 11 + (monthly_count or 0) * 21 + (lifetime_count or 0) * 52
 
-    await update.message.reply_text(
-        f"Lust4trans Stripe 결제 누적\n\n"
+    reply_text = (
+        f"Lust4trans Stripe 결제 성공 고객 수 (전체 기간 누적)\n\n"
         f"Weekly: {weekly_count or 0}명 (${(weekly_count or 0) * 11})\n"
         f"Monthly: {monthly_count or 0}명 (${(monthly_count or 0) * 21})\n"
         f"Lifetime: {lifetime_count or 0}명 (${(lifetime_count or 0) * 52})\n\n"
         f"총: {total_count}명 (${total_amount})"
     )
+
+    await update.message.reply_text(reply_text)
 
 
 if __name__ == "__main__":
