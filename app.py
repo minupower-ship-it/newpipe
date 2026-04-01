@@ -1,5 +1,6 @@
 # app.py
 import os
+import asyncio
 import datetime
 import logging
 import stripe
@@ -75,6 +76,8 @@ async def startup_event():
         telegram_app.add_handler(CallbackQueryHandler(bot_instance.button_handler))
 
         telegram_app.add_handler(CommandHandler("paid", paid_command))
+        telegram_app.add_handler(CommandHandler("broadcast", broadcast_command,
+                                                filters=filters.User(user_id=ADMIN_USER_ID)))
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
         telegram_app.add_handler(CommandHandler("user", user_count_command,
@@ -360,6 +363,73 @@ async def stripe_webhook(request: Request):
         logger.error(f"Webhook processing error: {e}")
 
     return {"status": "success"}
+
+
+async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("Admin only command.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: /broadcast <message>")
+        return
+
+    message_text = ' '.join(context.args)
+
+    pool = await get_pool()
+
+    # 우선순위: morevids(1) > lust4trans(2) > letmebot(3) > tswrld(4) > onlytrns(5)
+    rows = await pool.fetch("""
+        SELECT DISTINCT ON (user_id) user_id, bot_name
+        FROM daily_logs
+        WHERE bot_name IS NOT NULL
+        ORDER BY user_id,
+          CASE bot_name
+            WHEN 'morevids'   THEN 1
+            WHEN 'lust4trans' THEN 2
+            WHEN 'letmebot'   THEN 3
+            WHEN 'tswrld'     THEN 4
+            WHEN 'onlytrns'   THEN 5
+            ELSE 6
+          END
+    """)
+
+    total = len(rows)
+    await update.message.reply_text(
+        f"📢 브로드캐스트 시작\n\n"
+        f"• 대상: {total}명\n"
+        f"• 메시지:\n{message_text}\n\n"
+        f"발송 중..."
+    )
+
+    success = 0
+    failed = 0
+
+    for row in rows:
+        target_user_id = row['user_id']
+        bot_name = row['bot_name']
+
+        if bot_name not in applications:
+            failed += 1
+            continue
+
+        try:
+            bot = applications[bot_name]["app"].bot
+            await bot.send_message(chat_id=target_user_id, text=message_text)
+            success += 1
+        except Exception as e:
+            logger.warning(f"Broadcast failed - user:{target_user_id} bot:{bot_name} error:{e}")
+            failed += 1
+
+        await asyncio.sleep(0.05)
+
+    await update.message.reply_text(
+        f"✅ 브로드캐스트 완료!\n\n"
+        f"• 성공: {success}명\n"
+        f"• 실패(차단/탈퇴 등): {failed}명\n"
+        f"• 총: {total}명"
+    )
 
 
 async def paid_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
