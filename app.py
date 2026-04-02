@@ -43,6 +43,9 @@ applications = {}
 # 중복 알림 방지용 캐시
 recent_notifications: Dict[str, float] = {}
 
+# 브로드캐스트 중복 실행 방지 플래그
+broadcast_running: bool = False
+
 
 def get_subscription_id_from_event(event_type: str, data_object: dict) -> Optional[str]:
     """Stripe 이벤트에서 subscription_id를 최대한 정확하게 추출"""
@@ -96,7 +99,7 @@ async def startup_event():
 
         webhook_url = f"{RENDER_EXTERNAL_URL}/webhook/{key}"
         try:
-            await telegram_app.bot.set_webhook(url=webhook_url)
+            await telegram_app.bot.set_webhook(url=webhook_url, drop_pending_updates=True)
             logger.info(f"{key} webhook set: {webhook_url}")
         except TimedOut:
             logger.warning(f"Webhook set timeout for {key}")
@@ -365,9 +368,14 @@ async def stripe_webhook(request: Request):
 
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global broadcast_running
     user_id = update.effective_user.id
     if user_id != 5619516265:
         await update.message.reply_text("Admin only command.")
+        return
+
+    if broadcast_running:
+        await update.message.reply_text("⚠️ 이미 브로드캐스트가 실행 중입니다.")
         return
 
     if not context.args:
@@ -402,26 +410,30 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"발송 중..."
     )
 
+    broadcast_running = True
     success = 0
     failed = 0
 
-    for row in rows:
-        target_user_id = row['user_id']
-        bot_name = row['bot_name']
+    try:
+        for row in rows:
+            target_user_id = row['user_id']
+            bot_name = row['bot_name']
 
-        if bot_name not in applications:
-            failed += 1
-            continue
+            if bot_name not in applications:
+                failed += 1
+                continue
 
-        try:
-            bot = applications[bot_name]["app"].bot
-            await bot.send_message(chat_id=target_user_id, text=message_text)
-            success += 1
-        except Exception as e:
-            logger.warning(f"Broadcast failed - user:{target_user_id} bot:{bot_name} error:{e}")
-            failed += 1
+            try:
+                bot = applications[bot_name]["app"].bot
+                await bot.send_message(chat_id=target_user_id, text=message_text)
+                success += 1
+            except Exception as e:
+                logger.warning(f"Broadcast failed - user:{target_user_id} bot:{bot_name} error:{e}")
+                failed += 1
 
-        await asyncio.sleep(0.05)
+            await asyncio.sleep(0.05)
+    finally:
+        broadcast_running = False
 
     await update.message.reply_text(
         f"✅ 브로드캐스트 완료!\n\n"
