@@ -366,7 +366,7 @@ async def stripe_webhook(request: Request):
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id != ADMIN_USER_ID:
+    if user_id != 5619516265:
         await update.message.reply_text("Admin only command.")
         return
 
