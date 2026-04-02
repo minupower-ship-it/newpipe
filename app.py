@@ -76,8 +76,7 @@ async def startup_event():
         telegram_app.add_handler(CallbackQueryHandler(bot_instance.button_handler))
 
         telegram_app.add_handler(CommandHandler("paid", paid_command))
-        telegram_app.add_handler(CommandHandler("broadcast", broadcast_command,
-                                                filters=filters.User(user_id=ADMIN_USER_ID)))
+        telegram_app.add_handler(CommandHandler("broadcast", broadcast_command))
         telegram_app.add_handler(CommandHandler("kick", kick_command))
 
         telegram_app.add_handler(CommandHandler("user", user_count_command,
