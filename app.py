@@ -386,11 +386,10 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     pool = await get_pool()
 
-    # 우선순위: morevids(1) > lust4trans(2) > letmebot(3) > tswrld(4) > onlytrns(5)
+    # 유저별로 사용한 봇 전체 조회 (우선순위 순)
     rows = await pool.fetch("""
-        SELECT DISTINCT ON (user_id) user_id, bot_name
-        FROM daily_logs
-        WHERE bot_name IS NOT NULL
+        SELECT user_id, bot_name
+        FROM (SELECT DISTINCT user_id, bot_name FROM daily_logs WHERE bot_name IS NOT NULL) t
         ORDER BY user_id,
           CASE bot_name
             WHEN 'morevids'   THEN 1
@@ -402,7 +401,15 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
           END
     """)
 
-    total = len(rows)
+    # 유저별 봇 목록 그룹화 (우선순위 순서 유지)
+    user_bots: Dict[int, list] = {}
+    for row in rows:
+        uid = row['user_id']
+        if uid not in user_bots:
+            user_bots[uid] = []
+        user_bots[uid].append(row['bot_name'])
+
+    total = len(user_bots)
     await update.message.reply_text(
         f"📢 브로드캐스트 시작\n\n"
         f"• 대상: {total}명\n"
@@ -415,20 +422,22 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     failed = 0
 
     try:
-        for row in rows:
-            target_user_id = row['user_id']
-            bot_name = row['bot_name']
+        for target_user_id, bot_names in user_bots.items():
+            sent = False
+            for bot_name in bot_names:
+                if bot_name not in applications:
+                    continue
+                try:
+                    bot = applications[bot_name]["app"].bot
+                    await bot.send_message(chat_id=target_user_id, text=message_text)
+                    success += 1
+                    sent = True
+                    break
+                except Exception as e:
+                    logger.warning(f"Broadcast fallback - user:{target_user_id} bot:{bot_name} error:{e}")
+                    continue  # 다음 봇으로 시도
 
-            if bot_name not in applications:
-                failed += 1
-                continue
-
-            try:
-                bot = applications[bot_name]["app"].bot
-                await bot.send_message(chat_id=target_user_id, text=message_text)
-                success += 1
-            except Exception as e:
-                logger.warning(f"Broadcast failed - user:{target_user_id} bot:{bot_name} error:{e}")
+            if not sent:
                 failed += 1
 
             await asyncio.sleep(0.05)
@@ -438,7 +447,7 @@ async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"✅ 브로드캐스트 완료!\n\n"
         f"• 성공: {success}명\n"
-        f"• 실패(차단/탈퇴 등): {failed}명\n"
+        f"• 실패(모든 봇 차단): {failed}명\n"
         f"• 총: {total}명"
     )
 
