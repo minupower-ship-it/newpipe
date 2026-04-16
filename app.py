@@ -18,10 +18,12 @@ from bots.morevids_bot import MoreVidsBot
 from bots.onlytrns_bot import OnlyTrnsBot
 from bots.tswrldbot import TsWrldBot
 from bots.lust4trans_bot import Lust4transBot
+from bots.pleasurecult_bot import PleasureCultBot
 from config import (
     STRIPE_WEBHOOK_SECRET, RENDER_EXTERNAL_URL, ADMIN_USER_ID,
     LETMEBOT_TOKEN, MOREVIDS_TOKEN, ONLYTRNS_TOKEN, TSWRLDBOT_TOKEN, LUST4TRANS_TOKEN,
-    LUST4TRANS_PROMOTER_ID, TSWRLDBOT_PROMOTER_ID, CHANNEL_ID
+    PLEASURECULT_TOKEN,
+    LUST4TRANS_PROMOTER_ID, TSWRLDBOT_PROMOTER_ID, PLEASURECULT_PROMOTER_ID, CHANNEL_ID
 )
 import transaction_report
 
@@ -36,6 +38,7 @@ BOT_CLASSES = {
     "onlytrns": {"cls": OnlyTrnsBot, "token": ONLYTRNS_TOKEN},
     "tswrld": {"cls": TsWrldBot, "token": TSWRLDBOT_TOKEN},
     "lust4trans": {"cls": Lust4transBot, "token": LUST4TRANS_TOKEN},
+    "pleasurecult": {"cls": PleasureCultBot, "token": PLEASURECULT_TOKEN},
 }
 
 applications = {}
@@ -221,6 +224,8 @@ async def stripe_webhook(request: Request):
                     promoter_id = int(LUST4TRANS_PROMOTER_ID or 0)
                 elif bot_name == "tswrld":
                     promoter_id = int(TSWRLDBOT_PROMOTER_ID or 0)
+                elif bot_name == "pleasurecult":
+                    promoter_id = PLEASURECULT_PROMOTER_ID
 
                 if promoter_id and promoter_id != ADMIN_USER_ID and bot_name in applications:
                     try:
@@ -290,6 +295,8 @@ async def stripe_webhook(request: Request):
                 promoter_id = int(LUST4TRANS_PROMOTER_ID or 0)
             elif bot_name == "tswrld":
                 promoter_id = int(TSWRLDBOT_PROMOTER_ID or 0)
+            elif bot_name == "pleasurecult":
+                promoter_id = PLEASURECULT_PROMOTER_ID
 
             if promoter_id and promoter_id != ADMIN_USER_ID and bot_name in applications:
                 try:
@@ -349,6 +356,8 @@ async def stripe_webhook(request: Request):
                         promoter_id = int(LUST4TRANS_PROMOTER_ID or 0)
                     elif bot_name == "tswrld":
                         promoter_id = int(TSWRLDBOT_PROMOTER_ID or 0)
+                    elif bot_name == "pleasurecult":
+                        promoter_id = PLEASURECULT_PROMOTER_ID
 
                     if promoter_id and promoter_id != ADMIN_USER_ID and bot_name in applications:
                         try:

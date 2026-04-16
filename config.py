@@ -13,6 +13,7 @@ MOREVIDS_TOKEN = os.getenv("MOREVIDS_TOKEN")
 ONLYTRNS_TOKEN = os.getenv("ONLYTRNS_TOKEN")
 TSWRLDBOT_TOKEN = os.getenv("TSWRLDBOT_TOKEN")
 LUST4TRANS_TOKEN = os.getenv("LUST4TRANS_TOKEN")
+PLEASURECULT_TOKEN = os.getenv("PLEASURECULT_TOKEN")
 
 # Stripe Price IDs
 LETMEBOT_PRICE_MONTHLY = os.getenv("LETMEBOT_PRICE_MONTHLY")
@@ -33,12 +34,14 @@ MOREVIDS_PORTAL_RETURN_URL = os.getenv("MOREVIDS_PORTAL_RETURN_URL")
 ONLYTRNS_PORTAL_RETURN_URL = os.getenv("ONLYTRNS_PORTAL_RETURN_URL")
 TSWRLDBOT_PORTAL_RETURN_URL = os.getenv("TSWRLDBOT_PORTAL_RETURN_URL")
 LUST4TRANS_PORTAL_RETURN_URL = os.getenv("LUST4TRANS_PORTAL_RETURN_URL")
+PLEASURECULT_PORTAL_RETURN_URL = os.getenv("PLEASURECULT_PORTAL_RETURN_URL")
 
 # Channel and Admin
 CHANNEL_ID = int(os.getenv("CHANNEL_ID", "0"))  # int 변환 추가
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))  # int 변환 추가
-LUST4TRANS_PROMOTER_ID = int(os.getenv("LUST4TRANS_PROMOTER_ID", "0"))  # int 변환 추가 (일관성 위해)
-TSWRLDBOT_PROMOTER_ID = int(os.getenv("TSWRLDBOT_PROMOTER_ID", "0"))  # int 변환 추가 (일관성 위해)
+LUST4TRANS_PROMOTER_ID = int(os.getenv("LUST4TRANS_PROMOTER_ID", "0"))
+TSWRLDBOT_PROMOTER_ID = int(os.getenv("TSWRLDBOT_PROMOTER_ID", "0"))
+PLEASURECULT_PROMOTER_ID = 7491082518
 
 # Crypto and PayPal
 CRYPTO_ADDRESS = os.getenv("CRYPTO_ADDRESS")
@@ -61,6 +64,7 @@ WELCOME_VIDEO_MOREVIDS = os.getenv("WELCOME_VIDEO_MOREVIDS")
 WELCOME_VIDEO_ONLYTRNS = os.getenv("WELCOME_VIDEO_ONLYTRNS")
 WELCOME_VIDEO_TSWRLD = os.getenv("WELCOME_VIDEO_TSWRLD")
 WELCOME_VIDEO_LUST4TRANS = os.getenv("WELCOME_VIDEO_LUST4TRANS")
+WELCOME_VIDEO_PLEASURECULT = os.getenv("WELCOME_VIDEO_PLEASURECULT")
 
 # Render External URL (웹훅용 - 필수!)
 RENDER_EXTERNAL_URL = os.getenv("RENDER_EXTERNAL_URL")
@@ -72,4 +76,5 @@ PLAN_PRICES = {
     'onlytrns': {'lifetime': '$25'},
     'tswrld': {'lifetime': '$21'},
     'lust4trans': {'weekly': '$11', 'monthly': '$21', 'lifetime': '$52'},
+    'pleasurecult': {'weekly': '$11', 'monthly': '$21', 'lifetime': '$52'},
 }
